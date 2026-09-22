@@ -1,0 +1,6 @@
+# LorenzCycleToolkit currently declares Python >= 3.12
+lorenzcycletoolkit @ git+https://github.com/daniloceano/LorenzCycleToolkit.git
+numpy>=1.26
+pandas>=2.0
+scipy>=1.11
+matplotlib>=3.8
