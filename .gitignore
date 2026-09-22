@@ -6,3 +6,5 @@ __pycache__/
 LEC_paper_results/
 LEC_real_test/
 toolkit_work/
+
+*_fixed/

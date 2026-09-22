@@ -161,20 +161,28 @@ def run_lorenz_cycle_toolkit(
             + "\n".join(completed.stderr.splitlines()[-20:])
         )
 
-    result_file = (
+    candidate_files = [
+        atmospheric_nc.parent / f"{atmospheric_nc.stem}_fixed" / f"{outname}.csv",
         workdir
         / "LEC_Results"
         / f"{atmospheric_nc.stem}_fixed"
-        / f"{outname}.csv"
-    )
-    if not result_file.exists():
-        matches = list((workdir / "LEC_Results").glob(f"**/{outname}.csv"))
-        if len(matches) == 1:
-            result_file = matches[0]
+        / f"{outname}.csv",
+    ]
+
+    result_file = next((p for p in candidate_files if p.exists()), None)
+
+    if result_file is None:
+        matches = list(atmospheric_nc.parent.glob(f"**/{outname}.csv"))
+        matches += list(workdir.glob(f"**/{outname}.csv"))
+
+        unique_matches = list(dict.fromkeys(p.resolve() for p in matches))
+
+        if len(unique_matches) == 1:
+            result_file = unique_matches[0]
         else:
             raise FileNotFoundError(
-                "Toolkit completed but the expected result CSV was not found: "
-                f"{result_file}"
+                "Toolkit completed but the result CSV could not be uniquely located. "
+                f"Found: {unique_matches}"
             )
 
     print(f"Toolkit results: {result_file}")
