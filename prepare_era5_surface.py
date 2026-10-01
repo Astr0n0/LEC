@@ -2,9 +2,9 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-INPUT_FILE = "era5_surface_test.nc"
-RADIATION_OUTPUT = "radiation_real.csv"
-PRECIP_OUTPUT = "precipitation_real.csv"
+INPUT_FILE = "era5_surface_100d.nc"
+RADIATION_OUTPUT = "radiation_100d.csv"
+PRECIP_OUTPUT = "precipitation_100d.csv"
 
 ds = xr.open_dataset(INPUT_FILE)
 
