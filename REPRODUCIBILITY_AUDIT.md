@@ -877,3 +877,124 @@ The weak ERA5 result is not attributable to:
 The regional experiment is additionally affected by dynamically important boundary-energy transports and by numerical amplification of gamma when `Rn` approaches zero.
 
 Therefore, this 100-day regional ERA5 experiment should be interpreted as an exploratory sensitivity test rather than a direct global validation of the paper's reported correlation.
+
+---
+
+## 20. Autocorrelation-aware uncertainty analysis
+
+Because precipitation and gamma are time series, ordinary independent-sample confidence intervals can underestimate uncertainty when serial dependence is present.
+
+### Autocorrelation diagnostics
+
+The 6-hourly precipitation series exhibits substantial short-lag persistence:
+
+`lag 1 = 0.888205`
+
+`lag 2 = 0.726658`
+
+`lag 4 = 0.505357`
+
+The 6-hourly gamma series has little lag-1 persistence but shows a notable daily-scale component:
+
+`lag 4 = 0.351430`
+
+For daily data:
+
+`gamma lag 1 = -0.085837`
+
+and:
+
+`Z lag 1 = 0.567842`
+
+These diagnostics motivate the use of moving-block bootstrap rather than an iid bootstrap.
+
+Test:
+
+`autocorrelation_diagnostics.py`
+
+### Moving-block bootstrap
+
+A moving-block bootstrap was applied to preserve short-range temporal dependence.
+
+For the 6-hourly data, using a block length of 8 samples and 10,000 bootstrap realizations:
+
+`Pearson r = 0.022692`
+
+`95% CI = [-0.065701, 0.102600]`
+
+and:
+
+`Spearman r = -0.017398`
+
+`95% CI = [-0.124891, 0.080355]`
+
+Both intervals include zero.
+
+For the daily data, using a block length of 2 samples:
+
+`Pearson r = 0.109124`
+
+`95% CI = [-0.086461, 0.490830]`
+
+and:
+
+`Spearman r = 0.230747`
+
+`95% CI = [0.006723, 0.431361]`
+
+The daily Spearman interval is slightly above zero for this specific short block length.
+
+Test:
+
+`block_bootstrap_correlation.py`
+
+### Block-length sensitivity
+
+Because bootstrap inference can depend on block length, the analysis was repeated over multiple block sizes.
+
+For the 6-hourly analysis, all tested block lengths:
+
+`4, 8, 12, 16`
+
+produced Pearson and Spearman 95% intervals that included zero.
+
+For the daily analysis, Pearson intervals included zero for every tested block length:
+
+`2, 3, 4, 5, 7, 10`
+
+The daily Spearman interval was slightly above zero for block lengths:
+
+`2, 3, 4`
+
+but included zero for block lengths:
+
+`5, 7, 10`
+
+For example:
+
+`block = 5 -> Spearman 95% CI = [-0.002385, 0.452981]`
+
+`block = 7 -> Spearman 95% CI = [-0.009051, 0.449298]`
+
+`block = 10 -> Spearman 95% CI = [-0.037200, 0.431689]`
+
+Therefore, the apparent positive daily rank correlation is sensitive to the assumed temporal block length and is not robust across reasonable autocorrelation-preserving bootstrap choices.
+
+Test:
+
+`block_bootstrap_sensitivity.py`
+
+### Updated statistical interpretation
+
+The autocorrelation-aware analysis reinforces the earlier robustness results.
+
+At 6-hour resolution, there is no stable evidence for a contemporaneous gamma-precipitation relationship.
+
+At daily resolution, a weak positive rank association can appear under some short-block bootstrap choices, but it is sensitive to both:
+
+- radiation-denominator thresholding
+- bootstrap block length
+
+Therefore, the current 100-day regional ERA5 experiment does not provide robust statistical support for a strong gamma-precipitation relationship comparable to the paper's reported:
+
+`r = 0.865`
