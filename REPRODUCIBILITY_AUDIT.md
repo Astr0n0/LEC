@@ -528,3 +528,107 @@ No tested atmospheric/precipitation seed combination approached the published co
 Test:
 
 `paper_appendix_joint_seed_sweep.py`
+
+---
+
+## 18. ERA5 100-day real-data analysis
+
+The physically corrected workflow was also evaluated using ERA5 atmospheric, radiation, and precipitation data.
+
+### 6-hourly analysis
+
+Results:
+
+`n_samples          = 399`
+`Pearson r(gamma,Z) = 0.022692`
+`gamma mean         = -0.011245`
+`gamma std          = 0.421651`
+`Rn mean            = 63.714218 W/m2`
+`dEL/dt mean        = 0.245221 W/m2`
+`Z mean             = 4.144665 mm/day`
+
+The contemporaneous correlation is therefore close to zero.
+
+### Daily analysis
+
+Results:
+
+`n_samples          = 100`
+`Pearson r(gamma,Z) = 0.109124`
+`gamma mean         = 0.016706`
+`gamma std          = 0.488383`
+`Rn mean            = 63.930227 W/m2`
+`dEL/dt mean        = 0.253393 W/m2`
+`Z mean             = 4.144777 mm/day`
+
+The daily contemporaneous correlation is positive but weak.
+
+### Sensitivity to small net-radiation values
+
+Because:
+
+`gamma = (dEL/dt) / Rn`
+
+small values of `|Rn|` can strongly amplify gamma.
+
+The correlation was therefore recalculated after progressively excluding small `|Rn|` values.
+
+For the 6-hourly data, the correlation remained small across all tested thresholds.
+
+For the daily data, the correlation changed substantially with the threshold, including:
+
+`|Rn| >= 5   -> r = 0.233653`
+`|Rn| >= 10  -> r = 0.108506`
+`|Rn| >= 20  -> r = 0.024552`
+`|Rn| >= 40  -> r = 0.008150`
+`|Rn| >= 50  -> r = 0.018089`
+
+This indicates that the apparent daily relationship is not robust to the treatment of small net-radiation denominators.
+
+Test:
+
+`rn_threshold_sensitivity.py`
+
+### Lag and multiple-testing robustness
+
+A search across:
+
+- radiation thresholds from `0.5` to `50 W/m2`
+- lags from `-10` to `+10` days
+
+found the strongest observed relationship at:
+
+`threshold = 40 W/m2`
+`lag       = +4 days`
+`n         = 69`
+`r         = -0.380657`
+
+However, a circular-shift null test that repeats the complete threshold-and-lag search gave:
+
+`corrected p-value = 0.540000`
+
+and:
+
+`95th percentile of null maximum |r| = 0.407977`
+
+The observed maximum absolute correlation:
+
+`|r| = 0.380657`
+
+is below the 95th percentile of the null distribution.
+
+Therefore, the strongest lagged relationship found in this exploratory 100-day analysis is not statistically significant after accounting for the threshold and lag search.
+
+Test:
+
+`circular_shift_test.py`
+
+### Current real-data conclusion
+
+For this 100-day ERA5 analysis, the corrected physical LEC workflow does not reproduce the paper's reported:
+
+`r = 0.865`
+
+The contemporaneous correlations are weak, sensitivity to the radiation denominator is substantial, and the strongest lagged correlation is not significant under the circular-shift robustness test.
+
+These results apply only to the present ERA5 analysis configuration and should not be interpreted as a general rejection of an energy-precipitation relationship.
