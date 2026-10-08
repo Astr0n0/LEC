@@ -121,3 +121,11 @@ Provide a time column and one of `Z`, `precipitation`, `precip`, `tp`, or `preci
 LorenzCycleToolkit: https://github.com/daniloceano/LorenzCycleToolkit
 
 The implementation intentionally calls the Toolkit instead of copying its LEC equations into this project, keeping the LEC diagnostic traceable to the maintained scientific package.
+
+## Reproducibility audit
+
+A detailed audit of the paper's numerical simulation and the reported `r = 0.865` result is available in:
+
+[`REPRODUCIBILITY_AUDIT.md`](REPRODUCIBILITY_AUDIT.md)
+
+The published correlation has not been reproduced from the available code and stated parameters. The audit documents the Appendix execution issue, deterministic reproduction, parameter sensitivity tests, Monte Carlo analysis, and atmospheric seed sweep.
