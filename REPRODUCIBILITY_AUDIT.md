@@ -632,3 +632,248 @@ For this 100-day ERA5 analysis, the corrected physical LEC workflow does not rep
 The contemporaneous correlations are weak, sensitivity to the radiation denominator is substantial, and the strongest lagged correlation is not significant under the circular-shift robustness test.
 
 These results apply only to the present ERA5 analysis configuration and should not be interpreted as a general rejection of an energy-precipitation relationship.
+
+---
+
+## 19. ERA5 diagnostic robustness checks
+
+Additional diagnostics were performed to test whether the weak ERA5 relationship could be explained by numerical processing choices, outliers, or regional energy-budget structure.
+
+### Daily derivative consistency
+
+Two daily constructions were compared:
+
+1. average the 6-hourly `dE_L/dt`, then form daily gamma
+2. first average `E_L` daily, then recompute `dE_L/dt`
+
+Results:
+
+`current daily r      = 0.109124`
+`recomputed daily r   = 0.111612`
+`corr(two gamma)      = 0.982790`
+
+Therefore, the weak daily correlation is not explained by the order of daily resampling and differentiation.
+
+Test:
+
+`daily_derivative_consistency.py`
+
+### Gamma distribution and denominator amplification
+
+The observed gamma distribution is strongly heavy-tailed.
+
+For the 6-hourly analysis:
+
+`gamma min            = -3.401993`
+`gamma max            = 5.266565`
+`gamma median         = 0.002946`
+`gamma 99th percentile= 0.695345`
+
+For the daily analysis:
+
+`gamma min            = -1.900859`
+`gamma max            = 3.861180`
+`gamma median         = -0.008780`
+`gamma 99th percentile= 1.216261`
+
+Large `|gamma|` values are strongly associated with small `|Rn|`.
+
+Observed correlations:
+
+`corr(|gamma|, 1/|Rn|) = 0.823582` for 6-hourly data
+
+and:
+
+`corr(|gamma|, 1/|Rn|) = 0.641886` for daily data
+
+This confirms that the ratio is numerically amplified when the radiation denominator approaches zero.
+
+Tests:
+
+`gamma_distribution_check.py`
+
+`gamma_outlier_diagnosis.py`
+
+### Rank-based correlation robustness
+
+Spearman correlation was also evaluated to reduce sensitivity to extreme values.
+
+For the 6-hourly data, Spearman correlation remained close to zero across all tested radiation thresholds.
+
+For the daily data:
+
+`|Rn| >= 0.5 -> Spearman = 0.230747`
+
+`|Rn| >= 5   -> Spearman = 0.191576`
+
+`|Rn| >= 10  -> Spearman = 0.082586`
+
+`|Rn| >= 20  -> Spearman = 0.061374`
+
+`|Rn| >= 40  -> Spearman = 0.012276`
+
+`|Rn| >= 50  -> Spearman = 0.019869`
+
+Thus, the weak daily relationship also disappears as small-denominator samples are removed.
+
+Test:
+
+`robust_correlation_check.py`
+
+### ERA5 input and processing consistency
+
+The ERA5 pressure-level dataset contains:
+
+`400` six-hourly time steps
+
+with pressure levels:
+
+`1000, 850, 700, 500, 300, 200, 100 hPa`
+
+over the regional domain:
+
+`17.5 S to 42.5 S`
+
+`60 W to 30 W`
+
+The atmospheric variables and units are consistent with the LorenzCycleToolkit input requirements:
+
+- geopotential
+- temperature
+- zonal wind
+- meridional wind
+- pressure vertical velocity
+
+The surface ERA5 dataset contains:
+
+`2400` hourly records
+
+for:
+
+- top net short-wave radiation
+- top net long-wave radiation
+- total precipitation
+
+The generated 6-hourly radiation and precipitation CSV files reproduce the transformations from the raw NetCDF data to numerical precision.
+
+Maximum absolute differences were:
+
+`radiation    = 1.18e-11`
+
+`precipitation= 2.18e-13`
+
+Tests:
+
+`era5_pressure_metadata_check.py`
+
+`era5_surface_metadata_check.py`
+
+`era5_surface_processing_consistency.py`
+
+### LorenzCycleToolkit output consistency
+
+The raw LorenzCycleToolkit result contains `400` time steps.
+
+The final analysis contains `399` time steps because the first atmospheric state at:
+
+`2020-01-01 00:00`
+
+has no complete preceding 6-hour surface interval.
+
+For all common timestamps, `Az`, `Ae`, `Kz`, and `Ke` agree with the raw toolkit result to floating-point precision.
+
+The independently calculated:
+
+`dE_L/dt = d(Az + Ae + Kz + Ke)/dt`
+
+also agrees with the sum of the toolkit finite-difference energy tendencies.
+
+Results:
+
+`max absolute difference = 1.82e-14`
+
+`correlation             = 1.0`
+
+Tests:
+
+`lec_output_consistency.py`
+
+`lec_derivative_consistency.py`
+
+### Regional boundary-energy terms
+
+Because this ERA5 experiment uses a finite regional domain, LorenzCycleToolkit includes boundary-energy transport terms.
+
+For the 400-step regional budget:
+
+`mean |dE_L/dt| = 4.753386 W/m2`
+
+`mean |B_total| = 7.235848 W/m2`
+
+and therefore:
+
+`mean |B_total| / mean |dE_L/dt| = 1.522251`
+
+The total budget closes to numerical precision:
+
+`maximum closure error = 7.11e-15 W/m2`
+
+The correlation between the total energy tendency and the total boundary term is:
+
+`r = 0.576293`
+
+Thus, boundary transport is dynamically important in this regional experiment and cannot be treated as negligible.
+
+Test:
+
+`regional_energy_budget_check.py`
+
+### Boundary-adjusted sensitivity
+
+As a diagnostic only, the diagnosed boundary contribution was removed from the total regional energy tendency before forming the radiation ratio.
+
+At 6-hour resolution, the resulting correlations remained weak:
+
+`Pearson ≈ -0.07 to -0.20`
+
+and:
+
+`Spearman ≈ -0.14 to -0.18`
+
+across the tested radiation thresholds.
+
+At daily resolution, the boundary-adjusted correlations also remained modest and threshold-dependent.
+
+The largest tested daily Pearson value was:
+
+`r = 0.257811`
+
+at:
+
+`|Rn| >= 50 W/m2`
+
+with only:
+
+`n = 62`
+
+samples.
+
+These calculations are sensitivity diagnostics only. They do not redefine the paper's gamma and do not establish a direct equivalence between the regional residual budget and the paper's global-like energy relation.
+
+Test:
+
+`regional_boundary_sensitivity.py`
+
+### Updated ERA5 assessment
+
+The weak ERA5 result is not attributable to:
+
+- a mismatch between raw ERA5 and processed radiation/precipitation
+- a mismatch between LorenzCycleToolkit output and the analysis file
+- an error in the total energy derivative
+- the order of daily resampling and differentiation
+- Pearson sensitivity alone
+
+The regional experiment is additionally affected by dynamically important boundary-energy transports and by numerical amplification of gamma when `Rn` approaches zero.
+
+Therefore, this 100-day regional ERA5 experiment should be interpreted as an exploratory sensitivity test rather than a direct global validation of the paper's reported correlation.
