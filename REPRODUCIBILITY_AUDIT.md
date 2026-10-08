@@ -341,3 +341,86 @@ Results from that workflow must be treated separately from the synthetic simulat
 Toolkit commit:
 
 `d38cda7e37d8e8a3a937a5919640a94bef19e34a`
+
+---
+
+## 15. Reconstruction of the printed Appendix
+
+The printed Appendix required two mechanical corrections before it could execute:
+
+1. The synthetic zonal wind `u` had shape:
+
+`(100, 36, 1, 1)`
+
+while the Dataset expected:
+
+`(100, 36, 72, 7)`
+
+It was therefore broadcast to the declared longitude and pressure-level dimensions.
+
+2. The printed eddy expressions used:
+
+`u_zm[..., np.newaxis]`
+
+which gives shape:
+
+`(100, 36, 7, 1)`
+
+and is incompatible with:
+
+`(100, 36, 72, 7)`
+
+The mechanically consistent form is:
+
+`u_zm[:, :, np.newaxis, :]`
+
+with the same correction applied to `v_zm` and `T_zm`.
+
+No model parameters were changed.
+
+After these two execution corrections, the reconstructed Appendix produced approximately:
+
+`Correlation between gamma and Z = 0.0324`
+
+with:
+
+`gamma std = 0.00554`
+
+This does not reproduce the reported:
+
+`r = 0.865`
+
+and the gamma variability is also substantially larger than the order of `10^-4` described in the paper.
+
+Test:
+
+`paper_appendix_reconstructed.py`
+
+### Appendix atmospheric-seed sweep
+
+The corrected Appendix reconstruction was then evaluated across 100 random seeds for the synthetic temperature field.
+
+Results:
+
+`runs              = 100`
+`mean_r            = 0.007063`
+`std_r             = 0.059884`
+`min_r             = -0.122729`
+`max_r             = 0.168062`
+`best_seed         = 39`
+`best_r             = 0.168062`
+`95th percentile   = 0.097309`
+`99th percentile   = 0.145740`
+`count(r >= 0.865) = 0`
+
+Gamma standard deviation across the sweep was:
+
+`mean = 0.005144`
+`min  = 0.003752`
+`max  = 0.008217`
+
+Therefore, the published correlation and the stated gamma scale were not reproduced by the printed Appendix after the minimum corrections required for execution.
+
+Test:
+
+`paper_appendix_seed_sweep.py`
