@@ -116,6 +116,40 @@ Provide a time column and one of `Z`, `precipitation`, `precip`, `tp`, or `preci
 - `05_conditional_expectation.png`
 - Toolkit stdout/stderr logs when Toolkit is run by the script
 
+## ERA5 100-day pilot result
+
+A 100-day regional ERA5 experiment was performed over:
+
+- latitude: `17.5 S to 42.5 S`
+- longitude: `60 W to 30 W`
+- period: `2020-01-01` to `2020-04-09`
+
+Using the corrected physical workflow:
+
+- 6-hourly Pearson `r(gamma, Z) = 0.022692`
+- daily Pearson `r(gamma, Z) = 0.109124`
+
+The reported paper value:
+
+`r = 0.865`
+
+was not reproduced.
+
+Robustness checks show that:
+
+- the 6-hourly relationship remains near zero under radiation-threshold and rank-correlation tests
+- the daily relationship is weak and sensitive to the treatment of small `|Rn|`
+- large `|gamma|` values are strongly amplified when `Rn` approaches zero
+- regional boundary-energy transports are dynamically important
+- the strongest lagged relationship is not significant after circular-shift correction
+- autocorrelation-aware block-bootstrap inference does not provide robust evidence for a strong relationship
+
+This ERA5 experiment is a regional 100-day sensitivity analysis, not a global validation or rejection of the underlying physical hypothesis.
+
+Full numerical details and diagnostics are documented in:
+
+[`REPRODUCIBILITY_AUDIT.md`](REPRODUCIBILITY_AUDIT.md)
+
 ## Source used
 
 LorenzCycleToolkit: https://github.com/daniloceano/LorenzCycleToolkit
