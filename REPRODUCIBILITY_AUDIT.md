@@ -474,3 +474,57 @@ The RNG implementation does not account for the discrepancy between the availabl
 Test:
 
 `legacy_rng_precipitation_sweep.py`
+
+---
+
+## 17. Joint atmospheric and precipitation seed sweep
+
+To test whether the reported correlation could arise from a specific combination of atmospheric and precipitation random seeds, both stochastic components were varied simultaneously.
+
+The corrected Appendix reconstruction was evaluated for:
+
+`100 atmospheric seeds`
+
+and:
+
+`100 precipitation seeds`
+
+giving:
+
+`10000 total seed combinations`
+
+The published precipitation parameters were retained:
+
+`theta = 0.1`
+
+`coupling = 5.0`
+
+`sigma = 1.5`
+
+`base_mean = 3.0`
+
+Results:
+
+`runs                         = 10000`
+`mean_r                       = -0.002015`
+`std_r                        = 0.064004`
+`min_r                        = -0.230243`
+`max_r                        = 0.260286`
+`best_atmospheric_seed        = 61`
+`best_precipitation_seed      = 73`
+`best_r                       = 0.260286`
+`95th percentile              = 0.103910`
+`99th percentile              = 0.149802`
+`99.9th percentile            = 0.206092`
+`count(r >= 0.865)            = 0`
+`fraction(r >= 0.865)         = 0.0`
+
+Therefore, varying both available random sources simultaneously does not reproduce the reported:
+
+`r = 0.865`
+
+No tested atmospheric/precipitation seed combination approached the published correlation.
+
+Test:
+
+`paper_appendix_joint_seed_sweep.py`
