@@ -424,3 +424,53 @@ Therefore, the published correlation and the stated gamma scale were not reprodu
 Test:
 
 `paper_appendix_seed_sweep.py`
+
+---
+
+## 16. Legacy NumPy RNG verification
+
+The published precipitation simulation uses the legacy NumPy random-number interface:
+
+`np.random.seed(...)`
+
+and:
+
+`np.random.randn()`
+
+To verify whether the random-number generator implementation could explain the discrepancy in the reported correlation, the precipitation model was repeated using NumPy's legacy `RandomState` generator.
+
+The deterministic gamma series was held fixed, and the published precipitation parameters were retained:
+
+`theta = 0.1`
+
+`coupling = 5.0`
+
+`sigma = 1.5`
+
+`base_mean = 3.0`
+
+A total of 10,000 independent precipitation realizations were generated using seeds 0 through 9999.
+
+Results:
+
+`runs                 = 10000`
+`mean_r               = 0.059442`
+`std_r                = 0.056381`
+`min_r                = -0.173672`
+`max_r                = 0.265705`
+`best_seed            = 3569`
+`best_r               = 0.265705`
+`95th percentile      = 0.149207`
+`99th percentile      = 0.188780`
+`count(r >= 0.865)    = 0`
+`fraction(r >= 0.865) = 0.0`
+
+Therefore, using the same legacy NumPy random-number family as the published Appendix does not reproduce the reported correlation.
+
+The RNG implementation does not account for the discrepancy between the available simulation and the reported:
+
+`r = 0.865`
+
+Test:
+
+`legacy_rng_precipitation_sweep.py`
