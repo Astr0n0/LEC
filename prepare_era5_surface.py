@@ -24,23 +24,33 @@ df = regional.to_dataframe()[["tsr", "ttr", "tp"]].copy()
 df.index = pd.DatetimeIndex(df.index)
 df = df.sort_index()
 
+if df.index.has_duplicates:
+    duplicates = df.index[df.index.duplicated()].unique()
+    raise ValueError(
+        "Duplicate hourly timestamps found: "
+        f"{list(duplicates[:5])}"
+    )
+
+# Treat both missing and non-finite values as invalid observations.
+df = df.replace([np.inf, -np.inf], np.nan)
+
 # ERA5 hourly accumulated radiation: J m^-2 during the preceding hour.
 # Build complete 6-hour periods ending at 00, 06, 12 and 18 UTC.
-counts = df["tsr"].resample("6h", closed="right", label="right").count()
+resample_args = {
+    "rule": "6h",
+    "closed": "right",
+    "label": "right",
+}
 
-tsr_6h = df["tsr"].resample(
-    "6h", closed="right", label="right"
-).sum()
+counts = df[["tsr", "ttr", "tp"]].resample(**resample_args).count()
 
-ttr_6h = df["ttr"].resample(
-    "6h", closed="right", label="right"
-).sum()
+tsr_6h = df["tsr"].resample(**resample_args).sum()
+ttr_6h = df["ttr"].resample(**resample_args).sum()
+tp_6h = df["tp"].resample(**resample_args).sum()
 
-tp_6h = df["tp"].resample(
-    "6h", closed="right", label="right"
-).sum()
-
-complete = counts == 6
+# A period is complete only if every hourly value of every variable exists
+# and is finite. Checking tsr alone could silently admit missing ttr or tp.
+complete = counts.eq(6).all(axis=1)
 
 tsr_6h = tsr_6h.loc[complete]
 ttr_6h = ttr_6h.loc[complete]
@@ -78,3 +88,5 @@ print(precipitation.to_string(index=False))
 print()
 print(f"Saved: {RADIATION_OUTPUT}")
 print(f"Saved: {PRECIP_OUTPUT}")
+
+ds.close()
