@@ -30,9 +30,14 @@ def safe_correlations(x, y):
     if len(x) < 3 or len(y) != len(x):
         return None
 
-    if not np.isfinite(x).all() or not np.isfinite(y).all():
-        return None
+    # Keep masked timestamps in the block sequence; filter pairs only when
+    # calculating the replicate statistic so temporal gaps are not compressed.
+    valid = np.isfinite(x) & np.isfinite(y)
+    x = x[valid]
+    y = y[valid]
 
+    if len(x) < 3:
+        return None
     if np.ptp(x) == 0 or np.ptp(y) == 0:
         return None
 
@@ -173,27 +178,29 @@ validate_regular_time_index(
 # Use the same interval-ending derivative for both 6-hourly and daily cases.
 # The previous analysis_timeseries.csv was generated from a centered gradient
 # and is intentionally not used here.
-sixh = sixh_raw.loc[sixh_raw["Rn"].abs() >= 0.5].copy()
-sixh["gamma"] = sixh["dELdt_interval"] / sixh["Rn"]
-sixh = sixh[["gamma", "Z"]].replace(
-    [np.inf, -np.inf], np.nan
-).dropna()
-
-if len(sixh) < 3:
-    raise ValueError("Not enough valid 6-hourly interval observations.")
+sixh = sixh_raw.copy()
+sixh["gamma"] = np.nan
+stable_rn = sixh["Rn"].abs() >= 0.5
+sixh.loc[stable_rn, "gamma"] = (
+    sixh.loc[stable_rn, "dELdt_interval"]
+    / sixh.loc[stable_rn, "Rn"]
+)
+sixh = sixh[["gamma", "Z"]]
 
 # Aggregate complete, aligned daily windows.
 daily_means = complete_daily_windows(sixh_raw)
 daily_means = daily_means.replace(
     [np.inf, -np.inf], np.nan
 )
-daily_means = daily_means.loc[daily_means["Rn"].abs() >= 0.5].copy()
-daily_means["gamma"] = (
-    daily_means["dELdt_interval"] / daily_means["Rn"]
+daily_means["gamma"] = np.nan
+stable_daily_rn = daily_means["Rn"].abs() >= 0.5
+daily_means.loc[stable_daily_rn, "gamma"] = (
+    daily_means.loc[stable_daily_rn, "dELdt_interval"]
+    / daily_means.loc[stable_daily_rn, "Rn"]
 )
-daily = daily_means[["gamma", "Z"]].replace(
-    [np.inf, -np.inf], np.nan
-).dropna()
+
+# Keep all complete daily timestamps; invalid denominators remain masked.
+daily = daily_means[["gamma", "Z"]]
 
 cases = {
     "6-hourly": sixh,
