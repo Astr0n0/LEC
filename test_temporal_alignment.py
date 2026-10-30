@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from LEC_reproduction import _resample_if_requested, load_lec_results
+from era5_analysis import load_interval_analysis
 
 
 class TemporalAlignmentTests(unittest.TestCase):
@@ -96,6 +97,76 @@ class TemporalAlignmentTests(unittest.TestCase):
             list(daily.index),
             list(pd.to_datetime(["2020-01-02"])),
         )
+
+    def test_shared_loader_aligns_daily_interval_means(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        root = Path(temp_dir.name)
+
+        lec_times = pd.date_range("2020-01-01 00:00", periods=5, freq="6h")
+        lec = pd.DataFrame(
+            {
+                "time": lec_times,
+                "Az": np.arange(5, dtype=float) * 21600.0,
+                "Ae": 0.0,
+                "Kz": 0.0,
+                "Ke": 0.0,
+            }
+        )
+        surface_times = lec_times[1:]
+        radiation = pd.DataFrame({"time": surface_times, "Rn": 100.0})
+        precipitation = pd.DataFrame({"time": surface_times, "Z": 2.0})
+
+        lec_path = root / "lec.csv"
+        radiation_path = root / "radiation.csv"
+        precipitation_path = root / "precipitation.csv"
+        lec.to_csv(lec_path, index=False)
+        radiation.to_csv(radiation_path, index=False)
+        precipitation.to_csv(precipitation_path, index=False)
+
+        result = load_interval_analysis(
+            lec_path,
+            radiation_path,
+            precipitation_path,
+            frequency="D",
+            min_abs_rn=0.5,
+        )
+
+        self.assertEqual(
+            list(result.index),
+            list(pd.to_datetime(["2020-01-02"])),
+        )
+        self.assertAlmostEqual(result["dE_L_dt"].iloc[0], 1.0)
+        self.assertAlmostEqual(result["R_n"].iloc[0], 100.0)
+        self.assertAlmostEqual(result["Z"].iloc[0], 2.0)
+        self.assertAlmostEqual(result["gamma"].iloc[0], 0.01)
+
+    def test_shared_loader_rejects_irregular_surface_timestamps(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        root = Path(temp_dir.name)
+
+        lec_times = pd.date_range("2020-01-01 00:00", periods=5, freq="6h")
+        lec = pd.DataFrame(
+            {
+                "time": lec_times,
+                "Az": np.arange(5, dtype=float) * 21600.0,
+                "Ae": 0.0,
+                "Kz": 0.0,
+                "Ke": 0.0,
+            }
+        )
+        surface_times = lec_times[[1, 2, 4]]
+        radiation = pd.DataFrame({"time": surface_times, "Rn": 100.0})
+        precipitation = pd.DataFrame({"time": lec_times[1:], "Z": 2.0})
+
+        paths = [root / name for name in ("lec.csv", "radiation.csv", "precipitation.csv")]
+        lec.to_csv(paths[0], index=False)
+        radiation.to_csv(paths[1], index=False)
+        precipitation.to_csv(paths[2], index=False)
+
+        with self.assertRaises(ValueError):
+            load_interval_analysis(*paths, frequency="D")
 
 
 if __name__ == "__main__":
