@@ -1,4 +1,4 @@
-﻿# Reproducibility Audit
+# Reproducibility Audit
 
 ## Scope
 
@@ -549,9 +549,11 @@ Results:
 
 The contemporaneous correlation is therefore close to zero.
 
-### Daily analysis
+### Daily analysis - legacy grouping (superseded)
 
-Results:
+The values below use the earlier daily grouping and are retained for historical traceability. They are superseded by the complete-window-aligned daily analysis in the updated temporal-alignment and bootstrap diagnostics.
+
+Legacy results:
 
 `n_samples          = 100`
 `Pearson r(gamma,Z) = 0.109124`
@@ -561,7 +563,7 @@ Results:
 `dEL/dt mean        = 0.253393 W/m2`
 `Z mean             = 4.144777 mm/day`
 
-The daily contemporaneous correlation is positive but weak.
+The legacy daily contemporaneous correlation was positive but weak. It must not be interpreted as the corrected aligned-daily result.
 
 ### Sensitivity to small net-radiation values
 
@@ -575,7 +577,7 @@ The correlation was therefore recalculated after progressively excluding small `
 
 For the 6-hourly data, the correlation remained small across all tested thresholds.
 
-For the daily data, the correlation changed substantially with the threshold, including:
+For the daily data, the following threshold results belong to the legacy grouping and are superseded by the corrected complete-window-aligned threshold analysis:
 
 `|Rn| >= 5   -> r = 0.233653`
 `|Rn| >= 10  -> r = 0.108506`
@@ -593,31 +595,31 @@ Test:
 
 A search across:
 
-- radiation thresholds from `0.5` to `50 W/m2`
-- lags from `-10` to `+10` days
+* radiation thresholds from `0.5` to `50 W/m2`
+* lags from `-10` to `+10` days
 
-found the strongest observed relationship at:
+The current corrected analysis found the strongest observed relationship at:
 
 `threshold = 40 W/m2`
 `lag       = +4 days`
-`n         = 69`
-`r         = -0.380657`
+`n         = 68`
+`r         = -0.386146`
 
-However, a circular-shift null test that repeats the complete threshold-and-lag search gave:
+The circular-shift null test repeats the complete threshold-and-lag search for each valid nonzero circular shift. The current results are:
 
-`corrected p-value = 0.540000`
-
-and:
-
-`95th percentile of null maximum |r| = 0.407977`
+`valid circular shifts = 98`
+`corrected p-value = 0.606061`
+`95th percentile of null maximum |r| = 0.446396`
 
 The observed maximum absolute correlation:
 
-`|r| = 0.380657`
+`|r| = 0.386146`
 
 is below the 95th percentile of the null distribution.
 
 Therefore, the strongest lagged relationship found in this exploratory 100-day analysis is not statistically significant after accounting for the threshold and lag search.
+
+These results supersede the earlier reported values (`r = -0.380657`, `n = 69`, corrected `p = 0.540000`, and null 95th percentile `= 0.407977`).
 
 Test:
 
@@ -646,7 +648,7 @@ Two daily constructions were compared:
 1. average the 6-hourly `dE_L/dt`, then form daily gamma
 2. first average `E_L` daily, then recompute `dE_L/dt`
 
-Results:
+Legacy results from the earlier daily grouping (superseded; not recomputed with the corrected complete-window alignment):
 
 `current daily r      = 0.109124`
 `recomputed daily r   = 0.111612`
@@ -700,7 +702,7 @@ Spearman correlation was also evaluated to reduce sensitivity to extreme values.
 
 For the 6-hourly data, Spearman correlation remained close to zero across all tested radiation thresholds.
 
-For the daily data:
+For the daily data, the following are legacy values from the earlier daily grouping. They are retained for historical traceability and are not the corrected aligned-daily threshold results:
 
 `|Rn| >= 0.5 -> Spearman = 0.230747`
 
@@ -828,7 +830,9 @@ Test:
 
 `regional_energy_budget_check.py`
 
-### Boundary-adjusted sensitivity
+### Boundary-adjusted sensitivity - legacy daily results pending realignment
+
+The daily values in this subsection were calculated with the earlier daily grouping. They have not yet been recomputed using the corrected complete-window alignment; treat them as legacy sensitivity results, not as updated aligned-daily estimates.
 
 As a diagnostic only, the diagnosed boundary contribution was removed from the total regional energy tendency before forming the radiation ratio.
 
@@ -844,7 +848,7 @@ across the tested radiation thresholds.
 
 At daily resolution, the boundary-adjusted correlations also remained modest and threshold-dependent.
 
-The largest tested daily Pearson value was:
+The largest tested daily Pearson value in this legacy analysis was:
 
 `r = 0.257811`
 
@@ -898,13 +902,7 @@ The 6-hourly gamma series has little lag-1 persistence but shows a notable daily
 
 `lag 4 = 0.351430`
 
-For daily data:
-
-`gamma lag 1 = -0.085837`
-
-and:
-
-`Z lag 1 = 0.567842`
+The previously reported daily lag-1 values (`gamma = -0.085837`, `Z = 0.567842`) were computed from the old saved daily grouping and should be treated as legacy diagnostics until recomputed from the aligned 99-day series.
 
 These diagnostics motivate the use of moving-block bootstrap rather than an iid bootstrap.
 
@@ -930,19 +928,23 @@ and:
 
 Both intervals include zero.
 
-For the daily data, using a block length of 2 samples:
+The original saved daily analysis used a superseded daily grouping and is not used for the updated daily inference.
 
-`Pearson r = 0.109124`
+Daily data were reconstructed from complete right-labelled 24-hour windows, each containing four 6-hour samples in `(day 00 UTC, next day 00 UTC]`. This yields 99 complete days, labelled from `2020-01-02 00:00` through `2020-04-09 00:00`.
 
-`95% CI = [-0.086461, 0.490830]`
+Using a block length of 2 samples and 10,000 bootstrap realizations:
+
+`Pearson r = -0.046642`
+
+`95% CI = [-0.182829, 0.422878]`
 
 and:
 
-`Spearman r = 0.230747`
+`Spearman r = 0.200965`
 
-`95% CI = [0.006723, 0.431361]`
+`95% CI = [-0.023718, 0.410465]`
 
-The daily Spearman interval is slightly above zero for this specific short block length.
+Both intervals include zero.
 
 Test:
 
@@ -958,27 +960,18 @@ For the 6-hourly analysis, all tested block lengths:
 
 produced Pearson and Spearman 95% intervals that included zero.
 
-For the daily analysis, Pearson intervals included zero for every tested block length:
 
-`2, 3, 4, 5, 7, 10`
+For the correctly aligned 99-day series, Pearson intervals included zero for every tested block length (`2, 3, 4, 5, 7, 10`). Spearman intervals also included zero at every tested block length.
 
-The daily Spearman interval was slightly above zero for block lengths:
+Examples:
 
-`2, 3, 4`
+`block = 2 -> Pearson 95% CI = [-0.181337, 0.416217]; Spearman 95% CI = [-0.021064, 0.412933]`
 
-but included zero for block lengths:
+`block = 5 -> Pearson 95% CI = [-0.166104, 0.432891]; Spearman 95% CI = [-0.016236, 0.439314]`
 
-`5, 7, 10`
+`block = 10 -> Pearson 95% CI = [-0.127848, 0.353778]; Spearman 95% CI = [-0.019845, 0.420222]`
 
-For example:
-
-`block = 5 -> Spearman 95% CI = [-0.002385, 0.452981]`
-
-`block = 7 -> Spearman 95% CI = [-0.009051, 0.449298]`
-
-`block = 10 -> Spearman 95% CI = [-0.037200, 0.431689]`
-
-Therefore, the apparent positive daily rank correlation is sensitive to the assumed temporal block length and is not robust across reasonable autocorrelation-preserving bootstrap choices.
+Across all tested block lengths, the 95% bootstrap confidence intervals for both Pearson and Spearman correlations include zero in the correctly aligned 99-day series. These results do not provide robust evidence of a non-zero contemporaneous correlation in this regional pilot.
 
 Test:
 

@@ -48,7 +48,7 @@ A custom namelist can be supplied if the NetCDF uses different variable names.
 
 ### 1. Install
 
-Use Python 3.12+ and install `requirements.txt`.
+Use Python 3.13.3 (the tested environment) and install `requirements.txt`.
 
 ### 2. Run LorenzCycleToolkit and the paper analysis in one command
 
@@ -127,7 +127,8 @@ A 100-day regional ERA5 experiment was performed over:
 Using the corrected physical workflow:
 
 - 6-hourly Pearson `r(gamma, Z) = 0.022692`
-- daily Pearson `r(gamma, Z) = 0.109124`
+- aligned daily Pearson `r(gamma, Z) = -0.046642` (`n = 99`, complete 24-hour windows)
+- aligned daily Spearman `rho(gamma, Z) = 0.200965`
 
 The reported paper value:
 
@@ -138,7 +139,9 @@ was not reproduced.
 Robustness checks show that:
 
 - the 6-hourly relationship remains near zero under radiation-threshold and rank-correlation tests
-- the daily relationship is weak and sensitive to the treatment of small `|Rn|`
+- the aligned daily Pearson relationship is near zero; threshold sensitivity is substantial (`r = 0.250702` at `|Rn| >= 5 W/m^2`, but near zero at higher thresholds)
+- the aligned daily moving-block bootstrap 95% intervals include zero for both Pearson and Spearman across all tested block lengths
+- the circular-shift test after threshold/lag search is not significant (`p = 0.606061`; maximum absolute observed correlation `= 0.386146` at threshold `|Rn| >= 40 W/m^2`, lag `4`, `n = 68`)
 - large `|gamma|` values are strongly amplified when `Rn` approaches zero
 - regional boundary-energy transports are dynamically important
 - the strongest lagged relationship is not significant after circular-shift correction
@@ -146,9 +149,6 @@ Robustness checks show that:
 
 This ERA5 experiment is a regional 100-day sensitivity analysis, not a global validation or rejection of the underlying physical hypothesis.
 
-Full numerical details and diagnostics are documented in:
-
-[`REPRODUCIBILITY_AUDIT.md`](REPRODUCIBILITY_AUDIT.md)
 
 ## Source used
 
