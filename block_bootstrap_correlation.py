@@ -104,31 +104,7 @@ def bootstrap_correlations(gamma, z, block_size, rng):
     )
 
 
-# 1. Load and validate the original 6-hourly analysis series.
-sixh_df = read_time_csv(
-    r"LEC_100d_real\analysis_timeseries.csv"
-)
-validate_regular_time_index(
-    sixh_df.index,
-    "6h",
-    label="6-hourly analysis",
-)
-
-required = {"gamma", "Z"}
-missing = required.difference(sixh_df.columns)
-if missing:
-    raise ValueError(
-        f"6-hourly analysis is missing columns: {sorted(missing)}"
-    )
-
-sixh = sixh_df[["gamma", "Z"]].replace(
-    [np.inf, -np.inf], np.nan
-).dropna()
-
-if len(sixh) < 3:
-    raise ValueError("Not enough valid 6-hourly observations.")
-
-# 2. Load and validate raw input timestamps.
+# Load and validate raw input timestamps.
 lec = read_time_csv(r"era5_100d_fixed\paper_lec.csv")
 rad = read_time_csv("radiation_100d.csv")
 precip = read_time_csv("precipitation_100d.csv")
@@ -185,6 +161,18 @@ validate_regular_time_index(
     "6h",
     label="Aligned raw analysis",
 )
+
+# Use the same interval-ending derivative for both 6-hourly and daily cases.
+# The previous analysis_timeseries.csv was generated from a centered gradient
+# and is intentionally not used here.
+sixh = sixh_raw.loc[sixh_raw["Rn"].abs() >= 0.5].copy()
+sixh["gamma"] = sixh["dELdt_interval"] / sixh["Rn"]
+sixh = sixh[["gamma", "Z"]].replace(
+    [np.inf, -np.inf], np.nan
+).dropna()
+
+if len(sixh) < 3:
+    raise ValueError("Not enough valid 6-hourly interval observations.")
 
 # 4. Build complete, correctly aligned daily windows.
 daily_means = complete_daily_windows(sixh_raw)

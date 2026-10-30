@@ -17,7 +17,11 @@ LorenzCycleToolkit stores these reservoirs in **J m⁻²**. We therefore calcula
 
 and use the actual timestamps to obtain
 
-`dE_L/dt` in **W m⁻²**.
+`dE_L/dt` in **W m⁻²**. Because ERA5 accumulated radiation and precipitation
+at timestamp `t` describe the interval ending at `t`, the primary tendency is
+the matching interval difference
+`[E_L(t) - E_L(t-6h)] / 6h`. The centered derivative is retained only as a
+diagnostic and is not used in `gamma`.
 
 The paper's first definition of the energy ratio is then implemented directly:
 
@@ -101,6 +105,11 @@ or provide `Q`, `alpha`, and `F`; the code uses `Rn = Q(1-alpha)-F`.
 
 Radiation must correspond to the same spatial domain and time basis as the LEC calculation.
 
+When `--resample D` is used, the workflow forms right-labelled complete daily
+windows `(00:00, next 00:00]`, containing the four six-hour intervals ending
+at 06, 12, 18 and 00 UTC. Incomplete bins are discarded; partial days are not
+silently averaged.
+
 ## Precipitation CSV
 
 Provide a time column and one of `Z`, `precipitation`, `precip`, `tp`, or `precip_mm_day`. Values are expected in mm/day for the paper plots.
@@ -126,7 +135,8 @@ A 100-day regional ERA5 experiment was performed over:
 
 Using the corrected physical workflow:
 
-- 6-hourly Pearson `r(gamma, Z) = 0.022692`
+- 6-hourly Pearson `r(gamma, Z) = 0.022692` (legacy result from the centered
+  derivative; superseded pending recomputation with the interval-aligned tendency)
 - aligned daily Pearson `r(gamma, Z) = -0.046642` (`n = 99`, complete 24-hour windows)
 - aligned daily Spearman `rho(gamma, Z) = 0.200965`
 
@@ -138,7 +148,9 @@ was not reproduced.
 
 Robustness checks show that:
 
-- the 6-hourly relationship remains near zero under radiation-threshold and rank-correlation tests
+- previously reported 6-hourly threshold, rank-correlation and bootstrap results
+  used the centered derivative and must be recomputed before being treated as
+  final interval-aligned results
 - the aligned daily Pearson relationship is near zero; threshold sensitivity is substantial (`r = 0.250702` at `|Rn| >= 5 W/m^2`, but near zero at higher thresholds)
 - the aligned daily moving-block bootstrap 95% intervals include zero for both Pearson and Spearman across all tested block lengths
 - the circular-shift test after threshold/lag search is not significant (`p = 0.606061`; maximum absolute observed correlation `= 0.386146` at threshold `|Rn| >= 40 W/m^2`, lag `4`, `n = 68`)

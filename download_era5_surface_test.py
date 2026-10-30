@@ -1,7 +1,8 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import cdsapi
+import pandas as pd
 import xarray as xr
 
 
@@ -40,14 +41,27 @@ def build_month_groups():
     return groups
 
 
-def is_valid_netcdf(path):
+def is_valid_netcdf(path, year, month, days):
     if not path.exists():
         return False
 
     try:
         with xr.open_dataset(path) as ds:
-            required = {"tsr", "ttr", "tp"}
-            return required.issubset(ds.data_vars)
+            required_vars = {"tsr", "ttr", "tp"}
+            if not required_vars.issubset(ds.data_vars):
+                return False
+            if "valid_time" not in ds.coords:
+                return False
+            if ds.sizes.get("valid_time") != len(days) * len(TIMES):
+                return False
+
+            expected = pd.DatetimeIndex([
+                datetime(year, month, day, int(hour[:2]))
+                for day in days
+                for hour in TIMES
+            ])
+            actual = pd.DatetimeIndex(ds["valid_time"].values)
+            return actual.equals(expected)
     except Exception:
         return False
 
@@ -62,7 +76,7 @@ def download_parts():
         part_file = PARTS_DIR / f"era5_surface_{year}_{month:02d}.nc"
         files.append(part_file)
 
-        if is_valid_netcdf(part_file):
+        if is_valid_netcdf(part_file, year, month, days):
             print(f"EXISTS: {part_file}")
             continue
 
@@ -113,9 +127,19 @@ def combine_parts(files):
 
         combined = combined.sortby("valid_time")
 
-        combined = combined.sel(
-            valid_time=~combined.get_index("valid_time").duplicated()
+        expected_times = pd.date_range(
+            start=START_DATE, periods=N_DAYS * len(TIMES), freq="h"
         )
+        actual_times = pd.DatetimeIndex(combined["valid_time"].values)
+        if not actual_times.is_unique:
+            raise ValueError("Duplicate valid_time values found across monthly files.")
+        if not actual_times.equals(expected_times):
+            missing = expected_times.difference(actual_times)
+            unexpected = actual_times.difference(expected_times)
+            raise ValueError(
+                "Combined surface timeline is incomplete or unexpected. "
+                f"Missing={list(missing[:5])}; unexpected={list(unexpected[:5])}"
+            )
 
         combined.to_netcdf(OUTPUT_FILE)
 

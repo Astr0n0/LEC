@@ -214,7 +214,12 @@ def _read_time_indexed_csv(path: Path) -> pd.DataFrame:
 
 
 def load_lec_results(path: Path) -> pd.DataFrame:
-    """Load LorenzCycleToolkit result CSV and compute E_L and dE_L/dt."""
+    """Load Toolkit reservoirs and compute interval-aligned energy tendency.
+
+    dE_L_dt is the backward finite difference ending at each timestamp and
+    aligns with ERA5 accumulations for the preceding interval. The centered
+    gradient is retained separately for comparison with Toolkit diagnostics.
+    """
     path = path.expanduser().resolve()
     if not path.exists():
         raise FileNotFoundError(f"LEC result CSV not found: {path}")
@@ -231,24 +236,45 @@ def load_lec_results(path: Path) -> pd.DataFrame:
     for c in REQUIRED_LEC_COLUMNS:
         out[c] = pd.to_numeric(out[c], errors="raise")
 
-    out["E_L"] = out[list(REQUIRED_LEC_COLUMNS)].sum(axis=1)
+    # Require all four energy reservoirs; never sum a partial energy budget.
+    out[list(REQUIRED_LEC_COLUMNS)] = out[list(REQUIRED_LEC_COLUMNS)].replace(
+        [np.inf, -np.inf], np.nan
+    )
+    out["E_L"] = out[list(REQUIRED_LEC_COLUMNS)].sum(
+        axis=1, min_count=len(REQUIRED_LEC_COLUMNS)
+    )
+
     seconds = (out.index - out.index[0]).total_seconds().to_numpy(dtype=float)
     if len(seconds) < 2:
         raise ValueError("At least two LEC time steps are required")
-    if np.any(np.diff(seconds) <= 0):
+    intervals = np.diff(seconds)
+    if np.any(~np.isfinite(intervals)) or np.any(intervals <= 0):
         raise ValueError("LEC timestamps must be strictly increasing")
-    out["dE_L_dt"] = np.gradient(out["E_L"].to_numpy(dtype=float), seconds)
+
+    # ERA5 accumulated surface fields at timestamp t describe the interval
+    # ending at t. Pair them with the matching interval-mean energy tendency.
+    out["dE_L_dt"] = out["E_L"].diff() / pd.Series(
+        intervals, index=out.index[1:]
+    )
+
+    # Retain the centered derivative only for diagnostics and Toolkit checks.
+    out["dE_L_dt_centered"] = np.gradient(
+        out["E_L"].to_numpy(dtype=float), seconds
+    )
 
     derivative_cols = [f"∂{term}/∂t (finite diff.)" for term in REQUIRED_LEC_COLUMNS]
     if all(c in out.columns for c in derivative_cols):
         toolkit_tendency = out[derivative_cols].sum(axis=1).to_numpy(dtype=float)
-        diff = np.nanmax(np.abs(toolkit_tendency - out["dE_L_dt"].to_numpy(dtype=float)))
-        scale = max(1.0, float(np.nanmax(np.abs(out["dE_L_dt"]))))
-        if diff > 1e-8 * scale:
-            print(
-                "Warning: sum of toolkit component tendencies differs slightly from "
-                f"gradient(E_L): max abs difference={diff:.6g} W/m^2"
-            )
+        centered = out["dE_L_dt_centered"].to_numpy(dtype=float)
+        valid = np.isfinite(toolkit_tendency) & np.isfinite(centered)
+        if valid.any():
+            diff = float(np.max(np.abs(toolkit_tendency[valid] - centered[valid])))
+            scale = max(1.0, float(np.max(np.abs(centered[valid]))))
+            if diff > 1e-8 * scale:
+                print(
+                    "Warning: sum of toolkit component tendencies differs from "
+                    f"centered gradient(E_L): max abs difference={diff:.6g} W/m^2"
+                )
 
     return out
 
@@ -328,9 +354,35 @@ def load_precipitation_csv(path: Path) -> pd.DataFrame:
 
 
 def _resample_if_requested(df: pd.DataFrame, frequency: Optional[str]) -> pd.DataFrame:
+    """Resample interval-ending data into complete right-labelled bins."""
     if not frequency:
         return df
-    return df.resample(frequency).mean().dropna(how="all")
+
+    try:
+        target_delta = (
+            pd.Timedelta(days=1)
+            if frequency.strip().lower() in {"d", "1d"}
+            else pd.Timedelta(frequency)
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Resampling frequency must be a fixed duration that is a multiple of 6h."
+        ) from exc
+
+    six_hours = pd.Timedelta(hours=6)
+    if target_delta <= pd.Timedelta(0) or target_delta % six_hours != pd.Timedelta(0):
+        raise ValueError(
+            "Resampling frequency must be a positive multiple of 6h (for example 6h or D)."
+        )
+
+    expected = int(target_delta / six_hours)
+    resampler = df.resample(
+        frequency, origin="start_day", closed="right", label="right"
+    )
+    counts = resampler.count()
+    means = resampler.mean()
+    complete = counts.eq(expected).all(axis=1)
+    return means.loc[complete].copy()
 
 
 def align_energy_and_radiation(
@@ -350,11 +402,14 @@ def align_energy_and_radiation(
         )
 
     rn = merged["R_n"].to_numpy(dtype=float)
-    bad = ~np.isfinite(rn) | (np.abs(rn) < min_abs_rn)
+    tendency = merged["dE_L_dt"].to_numpy(dtype=float)
+    bad_rn = ~np.isfinite(rn) | (np.abs(rn) < min_abs_rn)
+    bad_tendency = ~np.isfinite(tendency)
+    bad = bad_rn | bad_tendency
     if bad.any():
         print(
-            f"Warning: dropping {int(bad.sum())} samples where |R_n| < {min_abs_rn} W/m^2 "
-            "or R_n is non-finite; gamma would be numerically unstable there."
+            f"Warning: dropping {int(bad.sum())} samples with an invalid energy tendency "
+            "or unstable/non-finite radiation denominator."
         )
         merged = merged.loc[~bad].copy()
 
@@ -559,7 +614,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--resample",
         default=None,
-        help="Optional pandas frequency for ALL aligned series, e.g. D or 6h",
+        help="Optional fixed resampling interval (multiple of 6h, e.g. 6h or D); only complete right-labelled bins are retained",
     )
     parser.add_argument(
         "--min-abs-rn",

@@ -117,26 +117,6 @@ def bootstrap_ci(x, y, block_size, rng):
     }
 
 
-# Load and validate the 6-hourly analysis.
-sixh_df = read_time_csv(
-    r"LEC_100d_real\analysis_timeseries.csv"
-)
-validate_regular_time_index(
-    sixh_df.index,
-    "6h",
-    label="6-hourly analysis",
-)
-
-missing = {"gamma", "Z"}.difference(sixh_df.columns)
-if missing:
-    raise ValueError(
-        f"Analysis CSV is missing columns: {sorted(missing)}"
-    )
-
-sixh = sixh_df[["gamma", "Z"]].replace(
-    [np.inf, -np.inf], np.nan
-).dropna()
-
 # Load and validate raw input files.
 lec = read_time_csv(r"era5_100d_fixed\paper_lec.csv")
 rad = read_time_csv("radiation_100d.csv")
@@ -190,12 +170,24 @@ validate_regular_time_index(
     sixh_raw.index, "6h", label="Aligned raw analysis"
 )
 
+# Use the same interval-ending derivative for both 6-hourly and daily cases.
+# The previous analysis_timeseries.csv was generated from a centered gradient
+# and is intentionally not used here.
+sixh = sixh_raw.loc[sixh_raw["Rn"].abs() >= 0.5].copy()
+sixh["gamma"] = sixh["dELdt_interval"] / sixh["Rn"]
+sixh = sixh[["gamma", "Z"]].replace(
+    [np.inf, -np.inf], np.nan
+).dropna()
+
+if len(sixh) < 3:
+    raise ValueError("Not enough valid 6-hourly interval observations.")
+
 # Aggregate complete, aligned daily windows.
 daily_means = complete_daily_windows(sixh_raw)
 daily_means = daily_means.replace(
     [np.inf, -np.inf], np.nan
 )
-daily_means = daily_means.loc[daily_means["Rn"] != 0].copy()
+daily_means = daily_means.loc[daily_means["Rn"].abs() >= 0.5].copy()
 daily_means["gamma"] = (
     daily_means["dELdt_interval"] / daily_means["Rn"]
 )

@@ -886,6 +886,17 @@ Therefore, this 100-day regional ERA5 experiment should be interpreted as an exp
 
 ## 20. Autocorrelation-aware uncertainty analysis
 
+> **Temporal-alignment update (2026-10-30):** The 6-hourly bootstrap figures
+> below were produced from the earlier `analysis_timeseries.csv`, whose
+> `gamma` used a centered `np.gradient(E_L)`. ERA5 accumulated surface fields
+> at timestamp `t` represent the interval ending at `t`; the production
+> workflow now uses `[E_L(t)-E_L(t-6h)]/6h` for that timestamp. Consequently,
+> the old 6-hourly bootstrap estimates and any 6-hourly correlations based on
+> the centered derivative are historical diagnostics, not final interval-aligned
+> estimates. Re-run the updated analysis and bootstrap scripts before citing
+> 6-hourly values. The aligned-daily calculations in this section already
+> reconstruct the interval tendency explicitly.
+
 Because precipitation and gamma are time series, ordinary independent-sample confidence intervals can underestimate uncertainty when serial dependence is present.
 
 ### Autocorrelation diagnostics
