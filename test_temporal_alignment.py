@@ -328,5 +328,26 @@ class TemporalAlignmentTests(unittest.TestCase):
         self.assertTrue(np.all((exceedance >= 0.0) & (exceedance <= 1.0)))
 
 
+    def test_build_analysis_rejects_extra_precipitation_timestamps(self):
+        from LEC_reproduction import build_analysis
+
+        times = pd.date_range("2020-01-01 06:00", periods=30, freq="6h")
+        rng = np.random.default_rng(31)
+        energy_gamma = pd.DataFrame(
+            {
+                "dE_L_dt": 1.0,
+                "R_n": 100.0,
+                "gamma": rng.normal(0.0, 0.2, len(times)),
+            },
+            index=times,
+        )
+        precipitation = pd.DataFrame(
+            {"Z": rng.gamma(2.0, 1.0, len(times) + 1)},
+            index=pd.date_range("2020-01-01 00:00", periods=31, freq="6h"),
+        )
+        with self.assertRaisesRegex(ValueError, "must exactly match"):
+            build_analysis(energy_gamma, precipitation)
+
+
 if __name__ == "__main__":
     unittest.main()
