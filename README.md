@@ -186,6 +186,7 @@ Provide a time column and one of `Z`, `precipitation`, `precip`, `tp`, or `preci
 - `psi.csv`
 - `conditional_cdf.csv`
 - `precipitation_exceedance_probability.csv`
+- `precipitation_exceedance_timeseries.csv`
 - `analysis_metadata.json`
 - `01_time_series.png`
 - `02_scatter.png`
@@ -201,6 +202,7 @@ The probabilistic outputs are distinct:
 - **conditional_pdf.csv** contains the conditional density p(Z | gamma).
 - **conditional_cdf.csv** contains P(Z <= z | gamma).
 - **precipitation_exceedance_probability.csv** contains P(Z > z_threshold | gamma) for every threshold on the saved Z grid. This avoids inventing a wet-day threshold not specified in the paper.
+- **precipitation_exceedance_timeseries.csv** interpolates those probabilities to each observed timestamp and lists the observed gamma, observed Z, threshold, and conditional exceedance probability. Values are NaN when gamma is masked or outside the fitted KDE grid.
 - **psi.csv** implements the PDF ratio in the paper's Eq. 40. It is a ratio of densities, not itself an event probability.
 
 The KDE treats precipitation as a continuous non-negative variable; it does not estimate a point mass at exactly zero. A rain/no-rain occurrence probability therefore requires a separately agreed wet-day threshold and a binary or hurdle model. The paper does not specify that threshold, so the pipeline does not invent one. The saved exceedance matrix supports evaluation once the research team selects the event definition.
