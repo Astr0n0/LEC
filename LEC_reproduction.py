@@ -563,40 +563,28 @@ def estimate_conditional_pdf(
     kde = gaussian_kde(np.vstack([gf, zf]))
     gamma_grid = np.linspace(float(np.min(gf)), float(np.max(gf)), gamma_points)
 
-    # Integrate the joint KDE over the full non-negative precipitation support.
-    # Five conditional-kernel standard deviations beyond the largest observed
-    # Z captures the remaining Gaussian tail to numerical precision.
+    # The upper bound extends five KDE bandwidths beyond the largest
+    # observed precipitation amount, capturing the positive Gaussian tail.
     z_bandwidth = float(np.sqrt(kde.covariance[1, 1]))
     z_upper = float(np.max(zf) + 5.0 * z_bandwidth)
-    z_norm_grid = np.linspace(0.0, z_upper, max(1000, z_points * 10))
-    gamma_mesh_norm, z_mesh_norm = np.meshgrid(gamma_grid, z_norm_grid)
-    joint_norm = kde(
-        np.vstack([gamma_mesh_norm.ravel(), z_mesh_norm.ravel()])
-    ).reshape(z_norm_grid.size, gamma_grid.size)
-    marginal_gamma_raw = np.trapezoid(joint_norm, z_norm_grid, axis=0)
-
-    if not np.isfinite(marginal_gamma_raw).all() or np.any(marginal_gamma_raw <= 0):
-        raise ValueError("KDE produced an invalid marginal density for gamma.")
-
-    # Normalize the marginal on the retained gamma support. The conditional
-    # density uses the corresponding unnormalized positive-support integral,
-    # so each p(Z|gamma) integrates to one over Z >= 0.
-    marginal_mass = float(np.trapezoid(marginal_gamma_raw, gamma_grid))
-    if not np.isfinite(marginal_mass) or marginal_mass <= 0:
-        raise ValueError("KDE marginal density could not be normalized.")
-    marginal_gamma = marginal_gamma_raw / marginal_mass
-
     z_grid = np.linspace(0.0, z_upper, z_points)
     gamma_mesh, z_mesh = np.meshgrid(gamma_grid, z_grid)
     joint = kde(
         np.vstack([gamma_mesh.ravel(), z_mesh.ravel()])
     ).reshape(z_grid.size, gamma_grid.size)
 
+    # Integrate the joint KDE on the same saved grid used for all outputs.
+    # This makes p(Z|gamma) exactly normalized under trapezoidal integration
+    # and gives a consistent marginal p(gamma) for the paper's Eq. 40 ratio.
+    marginal_gamma_raw = np.trapezoid(joint, z_grid, axis=0)
+    if not np.isfinite(marginal_gamma_raw).all() or np.any(marginal_gamma_raw <= 0):
+        raise ValueError("KDE produced an invalid marginal density for gamma.")
+    marginal_mass = float(np.trapezoid(marginal_gamma_raw, gamma_grid))
+    if not np.isfinite(marginal_mass) or marginal_mass <= 0:
+        raise ValueError("KDE marginal density could not be normalized.")
+    marginal_gamma = marginal_gamma_raw / marginal_mass
+
     conditional = joint / marginal_gamma_raw[np.newaxis, :]
-    conditional_mass = np.trapezoid(conditional, z_grid, axis=0)
-    if not np.isfinite(conditional_mass).all() or np.any(conditional_mass <= 0):
-        raise ValueError("Conditional KDE could not be normalized on the output Z grid.")
-    conditional = conditional / conditional_mass[np.newaxis, :]
     psi = conditional / marginal_gamma[np.newaxis, :]
     return z_grid, gamma_grid, conditional, psi
 
