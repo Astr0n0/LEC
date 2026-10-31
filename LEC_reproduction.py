@@ -193,8 +193,21 @@ def run_lorenz_cycle_toolkit(
                 f"Found: {unique_matches}"
             )
 
+    # Publish the primary CSV at a stable project-level path. The Toolkit
+    # writes into its working directory (LEC_Results/<input>_fixed), while
+    # downstream pipeline stages and diagnostics consume this canonical path.
+    canonical_result = (
+        atmospheric_nc.parent
+        / f"{atmospheric_nc.stem}_fixed"
+        / f"{outname}.csv"
+    )
+    canonical_result.parent.mkdir(parents=True, exist_ok=True)
+    if result_file.resolve() != canonical_result.resolve():
+        shutil.copy2(result_file, canonical_result)
+
     print(f"Toolkit results: {result_file}")
-    return result_file
+    print(f"Canonical LEC CSV: {canonical_result}")
+    return canonical_result
 
 
 def _read_time_indexed_csv(path: Path) -> pd.DataFrame:
