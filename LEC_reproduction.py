@@ -631,13 +631,14 @@ def build_analysis(
     frequency: Optional[str] = None,
 ) -> AnalysisResult:
     precip = _resample_if_requested(precipitation, frequency)
-    missing = energy_gamma.index.difference(precip.index)
-    if len(missing):
+    if not energy_gamma.index.equals(precip.index):
+        missing = energy_gamma.index.difference(precip.index)
+        extra = precip.index.difference(energy_gamma.index)
         raise ValueError(
-            "Precipitation is missing timestamps required by the aligned "
-            f"LEC/radiation analysis: {list(missing[:5])}."
+            "Precipitation timestamps must exactly match the aligned "
+            f"LEC/radiation timeline. Missing={list(missing[:5])}; "
+            f"unmatched={list(extra[:5])}."
         )
-    precip = precip.reindex(energy_gamma.index)
     frame = energy_gamma.join(precip[["Z"]], how="left", validate="one_to_one")
     frame = frame.replace([np.inf, -np.inf], np.nan)
     if frame["Z"].isna().any() or not np.isfinite(frame["Z"].to_numpy(dtype=float)).all():
