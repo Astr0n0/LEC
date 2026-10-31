@@ -308,5 +308,25 @@ class TemporalAlignmentTests(unittest.TestCase):
         )
 
 
+    def test_conditional_cdf_and_exceedance_probabilities_are_normalized(self):
+        from LEC_reproduction import conditional_probabilities
+
+        z_grid = np.linspace(0.0, 10.0, 201)
+        density = np.column_stack(
+            [
+                np.exp(-0.5 * ((z_grid - mean) / 1.0) ** 2)
+                for mean in (2.0, 4.0, 6.0)
+            ]
+        )
+        density /= np.trapezoid(density, z_grid, axis=0)[np.newaxis, :]
+        cdf, exceedance = conditional_probabilities(z_grid, density)
+
+        np.testing.assert_allclose(cdf[0], 0.0)
+        np.testing.assert_allclose(cdf[-1], 1.0)
+        np.testing.assert_allclose(exceedance, 1.0 - cdf)
+        self.assertTrue(np.all(np.diff(cdf, axis=0) >= -1e-12))
+        self.assertTrue(np.all((exceedance >= 0.0) & (exceedance <= 1.0)))
+
+
 if __name__ == "__main__":
     unittest.main()
