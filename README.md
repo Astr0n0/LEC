@@ -186,6 +186,8 @@ The probabilistic outputs are distinct:
 - **precipitation_exceedance_probability.csv** contains P(Z > z_threshold | gamma) for every threshold on the saved Z grid. This avoids inventing a wet-day threshold not specified in the paper.
 - **psi.csv** implements the PDF ratio in the paper's Eq. 40. It is a ratio of densities, not itself an event probability.
 
+The KDE treats precipitation as a continuous non-negative variable; it does not estimate a point mass at exactly zero. A rain/no-rain occurrence probability therefore requires a separately agreed wet-day threshold and a binary or hurdle model. The paper does not specify that threshold, so the pipeline does not invent one. The saved exceedance matrix supports evaluation once the research team selects the event definition.
+
 
 ## ERA5 100-day pilot result — historical values pending rerun
 
