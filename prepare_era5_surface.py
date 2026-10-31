@@ -11,6 +11,7 @@ import pandas as pd
 import xarray as xr
 
 from era5_surface_processing import aggregate_era5_hourly_surface
+from era5_metadata import SURFACE_UNITS, validate_grib_step_types, validate_variable_units
 
 
 def process_surface_dataset(
@@ -24,6 +25,17 @@ def process_surface_dataset(
         missing = required.difference(ds.data_vars)
         if missing:
             raise ValueError(f"Missing ERA5 surface variables: {sorted(missing)}")
+
+        units = {name: ds[name].attrs.get("units", "") for name in required}
+        validate_variable_units(
+            units, SURFACE_UNITS, dataset_label="ERA5 surface dataset"
+        )
+        step_types = {
+            name: ds[name].attrs.get("GRIB_stepType") for name in required
+        }
+        step_type_verified = validate_grib_step_types(
+            step_types, expected="accum", dataset_label="ERA5 surface dataset"
+        )
 
         required_coords = {"valid_time", "latitude", "longitude"}
         missing_coords = required_coords.difference(
@@ -45,6 +57,8 @@ def process_surface_dataset(
         frame = frame.sort_index()
 
     radiation, precipitation, audit = aggregate_era5_hourly_surface(frame)
+    audit["grib_step_type_verified"] = bool(step_type_verified)
+    audit["units"] = units
     radiation_output.parent.mkdir(parents=True, exist_ok=True)
     precipitation_output.parent.mkdir(parents=True, exist_ok=True)
     radiation.to_csv(radiation_output, index_label="time")
