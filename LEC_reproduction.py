@@ -33,6 +33,8 @@ import numpy as np
 import pandas as pd
 from scipy.stats import gaussian_kde
 
+from temporal_validation import validate_regular_time_index
+
 
 ERA5_COPERNICUS_NEW_NAMELIST = """;standard_name;Variable;Units
 Air Temperature;air_temperature;t;K
@@ -224,6 +226,7 @@ def load_lec_results(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"LEC result CSV not found: {path}")
     df = _read_time_indexed_csv(path)
+    validate_regular_time_index(df.index, "6h", label="LEC results")
 
     missing = [c for c in REQUIRED_LEC_COLUMNS if c not in df.columns]
     if missing:
@@ -290,6 +293,7 @@ def load_radiation_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Radiation CSV not found: {path}")
     df = _read_time_indexed_csv(path)
+    validate_regular_time_index(df.index, "6h", label="Radiation CSV")
 
     aliases = {c.lower(): c for c in df.columns}
     rn_col = next(
@@ -309,6 +313,8 @@ def load_radiation_csv(path: Path) -> pd.DataFrame:
         f = pd.to_numeric(df[aliases["f"]], errors="raise")
         rn = (q * (1.0 - alpha) - f).rename("R_n")
 
+    if not np.isfinite(rn.to_numpy(dtype=float)).all():
+        raise ValueError("Radiation contains non-finite values.")
     return rn.to_frame()
 
 
@@ -334,6 +340,7 @@ def load_precipitation_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Precipitation CSV not found: {path}")
     df = _read_time_indexed_csv(path)
+    validate_regular_time_index(df.index, "6h", label="Precipitation CSV")
     aliases = {c.lower(): c for c in df.columns}
     z_col = next(
         (
@@ -348,6 +355,8 @@ def load_precipitation_csv(path: Path) -> pd.DataFrame:
             "Precipitation CSV needs one of: Z, precipitation, precip, tp, precip_mm_day"
         )
     z = pd.to_numeric(df[z_col], errors="raise").rename("Z")
+    if not np.isfinite(z.to_numpy(dtype=float)).all():
+        raise ValueError("Precipitation contains non-finite values.")
     if (z < 0).any():
         raise ValueError("Precipitation contains negative values")
     return z.to_frame()
@@ -391,15 +400,29 @@ def align_energy_and_radiation(
     frequency: Optional[str] = None,
     min_abs_rn: float = 0.5,
 ) -> pd.DataFrame:
-    """Align dE_L/dt and R_n and compute dimensionless gamma."""
+    """Align interval-ending LEC tendencies and radiation without silent joins."""
+    if not np.isfinite(min_abs_rn) or min_abs_rn < 0:
+        raise ValueError("min_abs_rn must be finite and non-negative.")
+
     lec2 = _resample_if_requested(lec, frequency)
     rad2 = _resample_if_requested(radiation, frequency)
-    merged = lec2.join(rad2[["R_n"]], how="inner")
-    if merged.empty:
+
+    # The first LEC state has no preceding interval. Every subsequent tendency
+    # must have one and only one matching interval-ending radiation value.
+    valid_lec = lec2.loc[lec2["dE_L_dt"].notna()].copy()
+    if not valid_lec.index.equals(rad2.index):
+        missing_rn = valid_lec.index.difference(rad2.index)
+        extra_rn = rad2.index.difference(valid_lec.index)
         raise ValueError(
-            "No common timestamps between LEC and radiation. "
-            "Use --resample (for example D or 6h) only if scientifically appropriate."
+            "LEC and radiation timestamps do not match exactly after "
+            f"{frequency or '6-hourly'} alignment. "
+            f"Missing radiation timestamps={list(missing_rn[:5])}; "
+            f"unmatched radiation timestamps={list(extra_rn[:5])}."
         )
+
+    merged = valid_lec.join(rad2[["R_n"]], how="left", validate="one_to_one")
+    if merged.empty:
+        raise ValueError("No complete common timestamps remain after alignment.")
 
     rn = merged["R_n"].to_numpy(dtype=float)
     tendency = merged["dE_L_dt"].to_numpy(dtype=float)
@@ -408,8 +431,9 @@ def align_energy_and_radiation(
     bad = bad_rn | bad_tendency
     if bad.any():
         print(
-            f"Warning: dropping {int(bad.sum())} samples with an invalid energy tendency "
-            "or unstable/non-finite radiation denominator."
+            f"Warning: excluding {int(bad.sum())} samples from gamma because "
+            "the radiation denominator is unstable/non-finite or the "
+            "energy tendency is non-finite. Their timestamps are not shifted."
         )
         merged = merged.loc[~bad].copy()
 
@@ -417,7 +441,7 @@ def align_energy_and_radiation(
         raise ValueError("Too few valid samples remain after radiation alignment")
 
     merged["gamma"] = merged["dE_L_dt"] / merged["R_n"]
-    if not np.isfinite(merged["gamma"]).all():
+    if not np.isfinite(merged["gamma"].to_numpy(dtype=float)).all():
         raise ValueError("gamma contains non-finite values")
     return merged
 
@@ -460,38 +484,67 @@ def estimate_conditional_pdf(
     gamma_points: int = 80,
     z_points: int = 120,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Estimate p(Z|gamma) and the paper's Psi = p(Z|gamma)/p(gamma)."""
+    """Estimate p(Z|gamma) and Psi=p(Z|gamma)/p(gamma) on Z >= 0.
+
+    The gamma trimming follows the 1st/99th-percentile filter in the paper's
+    Appendix. Precipitation observations are not trimmed. Because precipitation
+    is non-negative, the KDE marginal p(gamma) is integrated over the positive
+    Z support, rather than over an arbitrary plotting window.
+    """
     gamma = np.asarray(gamma, dtype=float)
     z = np.asarray(z, dtype=float)
     valid = np.isfinite(gamma) & np.isfinite(z)
     gamma = gamma[valid]
     z = z[valid]
+
     if len(gamma) < 20:
         raise ValueError("At least 20 finite samples are recommended for 2-D KDE")
+    if np.any(z < 0):
+        raise ValueError("Precipitation values for KDE must be non-negative.")
     if np.std(gamma) == 0 or np.std(z) == 0:
         raise ValueError("KDE requires non-zero variance in both gamma and Z")
 
     lower_g, upper_g = np.percentile(gamma, [1, 99])
-    lower_z, upper_z = np.percentile(z, [0, 99.5])
-    if upper_z <= lower_z:
-        upper_z = float(np.max(z))
-    filtered = (gamma >= lower_g) & (gamma <= upper_g) & (z >= lower_z) & (z <= upper_z)
-    gf = gamma[filtered]
-    zf = z[filtered]
+    selected = (gamma > lower_g) & (gamma < upper_g)
+    gf = gamma[selected]
+    zf = z[selected]
     if len(gf) < 15:
         gf, zf = gamma, z
 
     kde = gaussian_kde(np.vstack([gf, zf]))
     gamma_grid = np.linspace(float(np.min(gf)), float(np.max(gf)), gamma_points)
-    z_grid = np.linspace(max(0.0, float(np.min(zf))), float(np.max(zf)), z_points)
-    gm, zm = np.meshgrid(gamma_grid, z_grid)
-    joint = kde(np.vstack([gm.ravel(), zm.ravel()])).reshape(z_grid.size, gamma_grid.size)
 
-    p_gamma = np.trapezoid(joint, z_grid, axis=0)
-    eps = np.finfo(float).eps
-    p_gamma = np.maximum(p_gamma, eps)
-    conditional = joint / p_gamma[np.newaxis, :]
-    psi = conditional / p_gamma[np.newaxis, :]
+    # Integrate the joint KDE over the full non-negative precipitation support.
+    # Five conditional-kernel standard deviations beyond the largest observed
+    # Z captures the remaining Gaussian tail to numerical precision.
+    z_bandwidth = float(np.sqrt(kde.covariance[1, 1]))
+    z_upper = float(np.max(zf) + 5.0 * z_bandwidth)
+    z_norm_grid = np.linspace(0.0, z_upper, max(1000, z_points * 10))
+    gamma_mesh_norm, z_mesh_norm = np.meshgrid(gamma_grid, z_norm_grid)
+    joint_norm = kde(
+        np.vstack([gamma_mesh_norm.ravel(), z_mesh_norm.ravel()])
+    ).reshape(z_norm_grid.size, gamma_grid.size)
+    marginal_gamma_raw = np.trapezoid(joint_norm, z_norm_grid, axis=0)
+
+    if not np.isfinite(marginal_gamma_raw).all() or np.any(marginal_gamma_raw <= 0):
+        raise ValueError("KDE produced an invalid marginal density for gamma.")
+
+    # Normalize the marginal on the retained gamma support. The conditional
+    # density uses the corresponding unnormalized positive-support integral,
+    # so each p(Z|gamma) integrates to one over Z >= 0.
+    marginal_mass = float(np.trapezoid(marginal_gamma_raw, gamma_grid))
+    if not np.isfinite(marginal_mass) or marginal_mass <= 0:
+        raise ValueError("KDE marginal density could not be normalized.")
+    marginal_gamma = marginal_gamma_raw / marginal_mass
+
+    z_grid = np.linspace(0.0, z_upper, z_points)
+    gamma_mesh, z_mesh = np.meshgrid(gamma_grid, z_grid)
+    joint = kde(
+        np.vstack([gamma_mesh.ravel(), z_mesh.ravel()])
+    ).reshape(z_grid.size, gamma_grid.size)
+
+    conditional = joint / marginal_gamma_raw[np.newaxis, :]
+    psi = conditional / marginal_gamma[np.newaxis, :]
     return z_grid, gamma_grid, conditional, psi
 
 
@@ -501,8 +554,21 @@ def build_analysis(
     frequency: Optional[str] = None,
 ) -> AnalysisResult:
     precip = _resample_if_requested(precipitation, frequency)
-    frame = energy_gamma.join(precip[["Z"]], how="inner")
-    frame = frame.replace([np.inf, -np.inf], np.nan).dropna(subset=["gamma", "Z"])
+    missing = energy_gamma.index.difference(precip.index)
+    if len(missing):
+        raise ValueError(
+            "Precipitation is missing timestamps required by the aligned "
+            f"LEC/radiation analysis: {list(missing[:5])}."
+        )
+    precip = precip.reindex(energy_gamma.index)
+    frame = energy_gamma.join(precip[["Z"]], how="left", validate="one_to_one")
+    frame = frame.replace([np.inf, -np.inf], np.nan)
+    if frame[["gamma", "Z"]].isna().any().any():
+        raise ValueError(
+            "The aligned analysis contains missing gamma or precipitation "
+            "values. Resolve the missing observations instead of silently "
+            "dropping timestamps."
+        )
     if len(frame) < 20:
         raise ValueError(
             f"Only {len(frame)} common gamma/precipitation samples are available; need at least 20"

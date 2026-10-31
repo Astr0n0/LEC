@@ -46,6 +46,17 @@ def load_interval_analysis(
     ):
         validate_regular_time_index(frame.index, "6h", label=label)
 
+    expected_surface_index = lec.index[1:]
+    if not radiation.index.equals(expected_surface_index):
+        raise ValueError(
+            "Radiation timestamps must exactly match the LEC intervals "
+            "ending after the first atmospheric state."
+        )
+    if not precipitation.index.equals(radiation.index):
+        raise ValueError(
+            "Precipitation timestamps must exactly match radiation timestamps."
+        )
+
     missing_energy = set(ENERGY_COLUMNS).difference(lec.columns)
     if missing_energy:
         raise ValueError(
@@ -68,7 +79,13 @@ def load_interval_analysis(
     precipitation["Z"] = pd.to_numeric(
         precipitation["Z"], errors="raise"
     )
-    if (precipitation["Z"].dropna() < 0).any():
+    if not np.isfinite(reservoirs.to_numpy(dtype=float)).all():
+        raise ValueError("LEC energy reservoirs contain missing or non-finite values.")
+    if not np.isfinite(radiation[rn_column].to_numpy(dtype=float)).all():
+        raise ValueError("Radiation contains missing or non-finite values.")
+    if not np.isfinite(precipitation["Z"].to_numpy(dtype=float)).all():
+        raise ValueError("Precipitation contains missing or non-finite values.")
+    if (precipitation["Z"] < 0).any():
         raise ValueError("Precipitation contains negative values.")
 
     reservoirs = lec[ENERGY_COLUMNS].replace(
@@ -81,13 +98,16 @@ def load_interval_analysis(
     dt_seconds = lec.index.to_series().diff().dt.total_seconds()
     tendency = (energy.diff() / dt_seconds).rename("dE_L_dt")
 
+    tendency = tendency.iloc[1:]
     frame = (
         tendency.to_frame()
-        .join(radiation[[rn_column]].rename(columns={rn_column: "R_n"}), how="inner")
-        .join(precipitation[["Z"]], how="inner")
-        .replace([np.inf, -np.inf], np.nan)
-        .dropna(subset=["dE_L_dt", "R_n", "Z"])
+        .join(radiation[[rn_column]].rename(columns={rn_column: "R_n"}), how="left", validate="one_to_one")
+        .join(precipitation[["Z"]], how="left", validate="one_to_one")
     )
+    if not frame.index.equals(expected_surface_index):
+        raise ValueError("Aligned analysis does not retain the complete expected interval timeline.")
+    if frame.isna().any().any() or not np.isfinite(frame.to_numpy(dtype=float)).all():
+        raise ValueError("Aligned LEC/radiation/precipitation data contain missing or non-finite values.")
     validate_regular_time_index(
         frame.index, "6h", label="aligned LEC/radiation/precipitation"
     )

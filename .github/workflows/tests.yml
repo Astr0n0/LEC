@@ -28,4 +28,4 @@ jobs:
           python -m pip install numpy pandas scipy matplotlib
 
       - name: Run temporal-alignment tests
-        run: python -m unittest -v test_temporal_alignment
+        run: python -m unittest discover -v

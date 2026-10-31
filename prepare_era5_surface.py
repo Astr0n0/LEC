@@ -1,92 +1,81 @@
+#!/usr/bin/env python3
+"""Prepare regional ERA5 radiation and precipitation from hourly accumulations."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import xarray as xr
 
-INPUT_FILE = "era5_surface_100d.nc"
-RADIATION_OUTPUT = "radiation_100d.csv"
-PRECIP_OUTPUT = "precipitation_100d.csv"
+from era5_surface_processing import aggregate_era5_hourly_surface
 
-ds = xr.open_dataset(INPUT_FILE)
 
-required = {"tsr", "ttr", "tp"}
-missing = required.difference(ds.data_vars)
-if missing:
-    raise ValueError(f"Missing variables: {sorted(missing)}")
+def process_surface_dataset(
+    input_file: Path,
+    radiation_output: Path,
+    precipitation_output: Path,
+) -> dict[str, object]:
+    """Create area-weighted, six-hourly Rn and precipitation CSV files."""
+    with xr.open_dataset(input_file) as ds:
+        required = {"tsr", "ttr", "tp"}
+        missing = required.difference(ds.data_vars)
+        if missing:
+            raise ValueError(f"Missing ERA5 surface variables: {sorted(missing)}")
 
-lat_weights = np.cos(np.deg2rad(ds["latitude"]))
-lat_weights = lat_weights / lat_weights.mean()
+        required_coords = {"valid_time", "latitude", "longitude"}
+        missing_coords = required_coords.difference(
+            set(ds.coords).union(ds.dims)
+        )
+        if missing_coords:
+            raise ValueError(f"Missing ERA5 coordinates: {sorted(missing_coords)}")
 
-regional = ds[["tsr", "ttr", "tp"]].weighted(lat_weights).mean(
-    dim=["latitude", "longitude"]
-)
+        lat = ds["latitude"]
+        weights = np.cos(np.deg2rad(lat))
+        if bool((weights <= 0).any()):
+            raise ValueError("Latitude weights must be positive in the selected domain.")
 
-df = regional.to_dataframe()[["tsr", "ttr", "tp"]].copy()
-df.index = pd.DatetimeIndex(df.index)
-df = df.sort_index()
+        regional = ds[["tsr", "ttr", "tp"]].weighted(weights).mean(
+            dim=["latitude", "longitude"]
+        )
+        frame = regional.to_dataframe()[["tsr", "ttr", "tp"]].copy()
+        frame.index = pd.DatetimeIndex(frame.index, name="time")
+        frame = frame.sort_index()
 
-if df.index.has_duplicates:
-    duplicates = df.index[df.index.duplicated()].unique()
-    raise ValueError(
-        "Duplicate hourly timestamps found: "
-        f"{list(duplicates[:5])}"
+    radiation, precipitation, audit = aggregate_era5_hourly_surface(frame)
+    radiation_output.parent.mkdir(parents=True, exist_ok=True)
+    precipitation_output.parent.mkdir(parents=True, exist_ok=True)
+    radiation.to_csv(radiation_output, index_label="time")
+    precipitation.to_csv(precipitation_output, index_label="time")
+    return audit
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Convert ERA5 hourly accumulated tsr/ttr/tp to 6-hourly Rn and Z."
     )
+    parser.add_argument("--input-file", type=Path, default=Path("era5_surface_100d.nc"))
+    parser.add_argument("--radiation-output", type=Path, default=Path("radiation_100d.csv"))
+    parser.add_argument("--precipitation-output", type=Path, default=Path("precipitation_100d.csv"))
+    return parser.parse_args()
 
-# Treat both missing and non-finite values as invalid observations.
-df = df.replace([np.inf, -np.inf], np.nan)
 
-# ERA5 hourly accumulated radiation: J m^-2 during the preceding hour.
-# Build complete 6-hour periods ending at 00, 06, 12 and 18 UTC.
-resample_args = {
-    "rule": "6h",
-    "closed": "right",
-    "label": "right",
-}
+def main() -> int:
+    args = parse_args()
+    audit = process_surface_dataset(
+        args.input_file,
+        args.radiation_output,
+        args.precipitation_output,
+    )
+    print("ERA5 surface processing audit:")
+    for key, value in audit.items():
+        print(f"{key}: {value}")
+    print(f"Saved radiation: {args.radiation_output}")
+    print(f"Saved precipitation: {args.precipitation_output}")
+    return 0
 
-counts = df[["tsr", "ttr", "tp"]].resample(**resample_args).count()
 
-tsr_6h = df["tsr"].resample(**resample_args).sum()
-ttr_6h = df["ttr"].resample(**resample_args).sum()
-tp_6h = df["tp"].resample(**resample_args).sum()
-
-# A period is complete only if every hourly value of every variable exists
-# and is finite. Checking tsr alone could silently admit missing ttr or tp.
-complete = counts.eq(6).all(axis=1)
-
-tsr_6h = tsr_6h.loc[complete]
-ttr_6h = ttr_6h.loc[complete]
-tp_6h = tp_6h.loc[complete]
-
-# Mean net TOA radiation flux during each 6-hour interval [W m^-2].
-rn = (tsr_6h + ttr_6h) / (6.0 * 3600.0)
-
-radiation = pd.DataFrame(
-    {
-        "time": rn.index,
-        "Rn": rn.values,
-    }
-)
-
-# ERA5 tp is accumulated water depth [m].
-# Convert 6-hour accumulation to equivalent mean precipitation rate [mm/day].
-precip_mm_day = tp_6h * 1000.0 * (24.0 / 6.0)
-
-precipitation = pd.DataFrame(
-    {
-        "time": precip_mm_day.index,
-        "Z": precip_mm_day.values,
-    }
-)
-
-radiation.to_csv(RADIATION_OUTPUT, index=False)
-precipitation.to_csv(PRECIP_OUTPUT, index=False)
-
-print("Radiation:")
-print(radiation.to_string(index=False))
-print()
-print("Precipitation:")
-print(precipitation.to_string(index=False))
-print()
-print(f"Saved: {RADIATION_OUTPUT}")
-print(f"Saved: {PRECIP_OUTPUT}")
-
-ds.close()
+if __name__ == "__main__":
+    raise SystemExit(main())

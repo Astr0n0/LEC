@@ -169,5 +169,70 @@ class TemporalAlignmentTests(unittest.TestCase):
             load_interval_analysis(*paths, frequency="D")
 
 
+    def test_main_alignment_rejects_missing_radiation_timestamps(self):
+        times = pd.date_range("2020-01-01 00:00", periods=5, freq="6h")
+        lec = pd.DataFrame(
+            {
+                "dE_L_dt": [np.nan, 1.0, 1.0, 1.0, 1.0],
+                "E_L": np.arange(5, dtype=float),
+            },
+            index=times,
+        )
+        radiation = pd.DataFrame(
+            {"R_n": 100.0},
+            index=times[2:],
+        )
+        with self.assertRaisesRegex(ValueError, "timestamps do not match exactly"):
+            from LEC_reproduction import align_energy_and_radiation
+            align_energy_and_radiation(lec, radiation)
+
+    def test_main_alignment_rejects_irregular_lec_timestamps(self):
+        times = pd.to_datetime(
+            ["2020-01-01 00:00", "2020-01-01 06:00", "2020-01-01 18:00"]
+        )
+        frame = pd.DataFrame(
+            {
+                "time": times,
+                "Az": [0.0, 21600.0, 64800.0],
+                "Ae": 0.0,
+                "Kz": 0.0,
+                "Ke": 0.0,
+            }
+        )
+        with self.assertRaises(ValueError):
+            load_lec_results(self._write_lec_csv(frame))
+
+    def test_build_analysis_rejects_missing_precipitation_timestamps(self):
+        from LEC_reproduction import build_analysis
+
+        times = pd.date_range("2020-01-01 06:00", periods=4, freq="6h")
+        energy_gamma = pd.DataFrame(
+            {
+                "dE_L_dt": 1.0,
+                "R_n": 100.0,
+                "gamma": np.linspace(0.01, 0.04, 4),
+            },
+            index=times,
+        )
+        precipitation = pd.DataFrame(
+            {"Z": [1.0, 2.0, 4.0]},
+            index=times[[0, 2, 3]],
+        )
+        with self.assertRaisesRegex(ValueError, "missing timestamps"):
+            build_analysis(energy_gamma, precipitation)
+
+    def test_conditional_pdf_normalizes_over_nonnegative_precipitation(self):
+        from LEC_reproduction import estimate_conditional_pdf
+
+        rng = np.random.default_rng(20261031)
+        gamma = rng.normal(0.0, 0.2, 300)
+        z = np.maximum(3.0 + 1.5 * gamma + rng.normal(0.0, 0.7, 300), 0.0)
+        z_grid, _, conditional, _ = estimate_conditional_pdf(
+            gamma, z, gamma_points=40, z_points=160
+        )
+        integrals = np.trapezoid(conditional, z_grid, axis=0)
+        np.testing.assert_allclose(integrals, np.ones_like(integrals), atol=0.02)
+
+
 if __name__ == "__main__":
     unittest.main()
