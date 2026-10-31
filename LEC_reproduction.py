@@ -569,6 +569,10 @@ def estimate_conditional_pdf(
     ).reshape(z_grid.size, gamma_grid.size)
 
     conditional = joint / marginal_gamma_raw[np.newaxis, :]
+    conditional_mass = np.trapezoid(conditional, z_grid, axis=0)
+    if not np.isfinite(conditional_mass).all() or np.any(conditional_mass <= 0):
+        raise ValueError("Conditional KDE could not be normalized on the output Z grid.")
+    conditional = conditional / conditional_mass[np.newaxis, :]
     psi = conditional / marginal_gamma[np.newaxis, :]
     return z_grid, gamma_grid, conditional, psi
 
