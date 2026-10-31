@@ -115,15 +115,37 @@ def _download_endpoint(
     if pressure_levels is not None:
         request["pressure_level"] = pressure_levels
 
+    temporary = output.with_name(
+        output.stem + ".download.tmp" + output.suffix
+    )
+    if temporary.exists():
+        if _validate_file(
+            temporary,
+            variables=required,
+            expected_time=ENDPOINT,
+            pressure_levels=pressure_levels,
+        ):
+            temporary.replace(output)
+            print(f"RECOVERED VALIDATED DOWNLOAD: {output}")
+            return
+        raise ValueError(
+            f"Incomplete temporary download exists: {temporary}. "
+            "Move it aside before retrying; it was not overwritten."
+        )
+
     print(f"Downloading {dataset} endpoint at {ENDPOINT} ...")
-    client.retrieve(dataset, request).download(str(output))
+    client.retrieve(dataset, request).download(str(temporary))
     if not _validate_file(
-        output,
+        temporary,
         variables=required,
         expected_time=ENDPOINT,
         pressure_levels=pressure_levels,
     ):
-        raise RuntimeError(f"Downloaded endpoint failed validation: {output}")
+        raise RuntimeError(
+            f"Downloaded endpoint failed validation: {temporary}. "
+            "The temporary file was retained for inspection."
+        )
+    temporary.replace(output)
     print(f"VALIDATED: {output}")
 
 
