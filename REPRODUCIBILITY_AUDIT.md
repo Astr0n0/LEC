@@ -1139,6 +1139,9 @@ event-probability outputs:
 - conditional_cdf.csv: P(Z <= z | gamma)
 - precipitation_exceedance_probability.csv: P(Z > z_threshold | gamma)
   for every precipitation threshold on the saved Z grid
+- precipitation_exceedance_timeseries.csv: interpolated conditional
+  exceedance probabilities for each observed timestamp and each threshold;
+  no extrapolation is performed outside the fitted gamma grid
 - psi.csv: the Eq. 40 density ratio
 
 No wet-day or heavy-precipitation threshold is hard-coded because the paper
