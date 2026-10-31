@@ -21,6 +21,9 @@ uses the directly diagnosed total energy tendency dE_L/dt.
 from __future__ import annotations
 
 import argparse
+import json
+import platform
+from importlib import metadata
 import shutil
 import subprocess
 import sys
@@ -756,7 +759,53 @@ def main() -> int:
 
     result = build_analysis(energy_gamma, precipitation, frequency=args.resample)
     result.frame.to_csv(output_dir / "analysis_timeseries.csv", index_label="time")
+    conditional_frame = pd.DataFrame(
+        result.conditional_pdf,
+        index=pd.Index(result.z_grid, name="Z_mm_day"),
+        columns=pd.Index(result.gamma_grid, name="gamma"),
+    )
+    psi_frame = pd.DataFrame(
+        result.psi,
+        index=pd.Index(result.z_grid, name="Z_mm_day"),
+        columns=pd.Index(result.gamma_grid, name="gamma"),
+    )
+    conditional_frame.to_csv(output_dir / "conditional_pdf.csv")
+    psi_frame.to_csv(output_dir / "psi.csv")
     create_plots(result, output_dir)
+
+    valid_gamma = np.isfinite(result.frame["gamma"].to_numpy(dtype=float))
+    analysis_metadata = {
+        "python_version": platform.python_version(),
+        "packages": {},
+        "lec_results_csv": str(lec_csv),
+        "radiation_csv": str(args.radiation_csv) if args.radiation_csv else "synthetic demonstration",
+        "precipitation_csv": str(args.precipitation_csv) if args.precipitation_csv else "synthetic demonstration",
+        "resampling_frequency": args.resample or "6h",
+        "timestamp_convention": "interval-ending; backward finite difference",
+        "daily_window": "(previous midnight, current midnight]" if args.resample and args.resample.lower() in {"d", "1d", "24h"} else None,
+        "gamma_definition": "dE_L_dt / R_n",
+        "minimum_absolute_radiation_W_m2": args.min_abs_rn,
+        "low_radiation_handling": "gamma is masked with NaN; timestamps are retained",
+        "total_samples": int(len(result.frame)),
+        "valid_gamma_samples": int(valid_gamma.sum()),
+        "masked_gamma_samples": int((~valid_gamma).sum()),
+        "finite_gamma_precipitation_pairs": int(valid_gamma.sum()),
+        "first_timestamp": str(result.frame.index.min()),
+        "last_timestamp": str(result.frame.index.max()),
+        "kde_gamma_percentile_filter": [1, 99],
+        "kde_precipitation_support_mm_day": [0.0, float(result.z_grid[-1])],
+        "conditional_pdf_normalization": "non-negative precipitation support",
+        "random_seed": args.seed,
+    }
+    for package in ("numpy", "pandas", "scipy", "matplotlib", "xarray", "LorenzCycleToolkit"):
+        try:
+            analysis_metadata["packages"][package] = metadata.version(package)
+        except metadata.PackageNotFoundError:
+            analysis_metadata["packages"][package] = None
+    (output_dir / "analysis_metadata.json").write_text(
+        json.dumps(analysis_metadata, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     summary = pd.Series(
         {
