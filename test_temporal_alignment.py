@@ -272,14 +272,15 @@ class TemporalAlignmentTests(unittest.TestCase):
         from LEC_reproduction import build_analysis
 
         times = pd.date_range("2020-01-01 06:00", periods=30, freq="6h")
-        gamma = np.linspace(-0.2, 0.2, len(times))
+        rng = np.random.default_rng(20261031)
+        gamma = rng.normal(0.0, 0.2, len(times))
         gamma[10] = np.nan
         energy_gamma = pd.DataFrame(
             {"dE_L_dt": 1.0, "R_n": 100.0, "gamma": gamma},
             index=times,
         )
         precipitation = pd.DataFrame(
-            {"Z": np.linspace(0.1, 5.0, len(times))},
+            {"Z": rng.gamma(shape=2.0, scale=1.2, size=len(times))},
             index=times,
         )
         result = build_analysis(energy_gamma, precipitation)
