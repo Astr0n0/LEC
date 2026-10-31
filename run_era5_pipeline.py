@@ -380,6 +380,12 @@ def main() -> int:
             "radiation_csv": str(RADIATION_CSV.name),
             "precipitation_csv": str(PRECIPITATION_CSV.name),
         },
+        "domain": {
+            "latitude_degrees": [-42.5, -17.5],
+            "longitude_degrees": [-60.0, -30.0],
+            "grid_resolution_degrees": 0.25,
+            "grid_shape_lat_lon": [101, 121],
+        },
         "analysis": {
             "six_hourly_samples": six_hourly_count,
             "complete_daily_samples": daily_count,
