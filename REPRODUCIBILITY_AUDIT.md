@@ -1152,3 +1152,15 @@ precipitation grid. They are in-sample descriptive probabilities; they do
 not constitute out-of-sample forecast skill. Any claim of predictive skill
 requires blocked out-of-sample validation and probability calibration.
 
+
+
+A further limitation is the treatment of zero precipitation. The current
+Gaussian KDE models Z as a continuous non-negative variable; it does not
+represent a discrete probability mass at exactly zero. Consequently,
+P(Z > z_threshold | gamma) is meaningful for positive thresholds on the
+saved grid, but the limit at zero should not be interpreted as a calibrated
+rain/no-rain occurrence probability. A wet-day occurrence model requires
+the research team to define a wet-day threshold and then fit/evaluate a
+binary or hurdle model. The paper does not specify such a threshold, so
+none is hard-coded here.
+
