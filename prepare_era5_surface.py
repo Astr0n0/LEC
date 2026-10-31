@@ -44,6 +44,18 @@ def process_surface_dataset(
         if missing_coords:
             raise ValueError(f"Missing ERA5 coordinates: {sorted(missing_coords)}")
 
+        expected_grid_cells = ds.sizes["latitude"] * ds.sizes["longitude"]
+        for variable in required:
+            finite_counts = np.isfinite(ds[variable]).sum(
+                dim=["latitude", "longitude"]
+            )
+            if bool((finite_counts != expected_grid_cells).any()):
+                raise ValueError(
+                    f"ERA5 surface variable {variable} has non-finite spatial "
+                    "grid cells; regional averaging would silently change "
+                    "the effective area."
+                )
+
         lat = ds["latitude"]
         weights = np.cos(np.deg2rad(lat))
         if bool((weights <= 0).any()):
@@ -58,6 +70,7 @@ def process_surface_dataset(
 
     radiation, precipitation, audit = aggregate_era5_hourly_surface(frame)
     audit["grib_step_type_verified"] = bool(step_type_verified)
+    audit["spatial_grid_cells"] = int(expected_grid_cells)
     audit["units"] = units
     radiation_output.parent.mkdir(parents=True, exist_ok=True)
     precipitation_output.parent.mkdir(parents=True, exist_ok=True)
