@@ -131,7 +131,7 @@ def validate_extended_inputs() -> None:
             PRESSURE_UNITS,
             dataset_label="ERA5 pressure-level dataset",
         )
-        validate_grib_step_types(
+        pressure_step_verified = validate_grib_step_types(
             {
                 name: ds[name].attrs.get("GRIB_stepType")
                 for name in PRESSURE_UNITS
@@ -139,6 +139,8 @@ def validate_extended_inputs() -> None:
             expected="instant",
             dataset_label="ERA5 pressure-level dataset",
         )
+        if not pressure_step_verified:
+            print("WARNING: pressure-level GRIB_stepType attributes are absent; units and ERA5 dataset identity remain validated.")
 
     with xr.open_dataset(SURFACE_EXTENDED) as ds:
         validate_variable_units(
@@ -146,7 +148,7 @@ def validate_extended_inputs() -> None:
             SURFACE_UNITS,
             dataset_label="ERA5 surface dataset",
         )
-        validate_grib_step_types(
+        surface_step_verified = validate_grib_step_types(
             {
                 name: ds[name].attrs.get("GRIB_stepType")
                 for name in SURFACE_UNITS
@@ -154,6 +156,8 @@ def validate_extended_inputs() -> None:
             expected="accum",
             dataset_label="ERA5 surface dataset",
         )
+        if not surface_step_verified:
+            print("WARNING: surface GRIB_stepType attributes are absent; official ERA5 accumulation documentation is used.")
 
 
 def validate_lec_results(path: Path) -> None:
