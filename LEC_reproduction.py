@@ -635,9 +635,9 @@ def build_analysis(
         missing = energy_gamma.index.difference(precip.index)
         extra = precip.index.difference(energy_gamma.index)
         raise ValueError(
-            "Precipitation timestamps must exactly match the aligned "
-            f"LEC/radiation timeline. Missing={list(missing[:5])}; "
-            f"unmatched={list(extra[:5])}."
+            "Precipitation has missing timestamps or unmatched timestamps "
+            "relative to the aligned LEC/radiation timeline. "
+            f"Missing={list(missing[:5])}; unmatched={list(extra[:5])}."
         )
     frame = energy_gamma.join(precip[["Z"]], how="left", validate="one_to_one")
     frame = frame.replace([np.inf, -np.inf], np.nan)
