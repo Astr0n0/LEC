@@ -1088,6 +1088,7 @@ The repository now includes:
 
 - ERA5_TEMPORAL_VALIDATION.md: full convention, unit and coverage record.
 - era5_surface_processing.py: tested aggregation of hourly accumulations.
+- era5_metadata.py: validates ERA5 pressure/surface units and GRIB step types when present.
 - prepare_era5_surface.py: area-weighted processing with explicit inputs
   and outputs.
 - extend_era5_100d.py: requests only the two missing endpoint records and
