@@ -60,6 +60,13 @@ class Era5MetadataTests(unittest.TestCase):
                 dataset_label="surface",
             )
         )
+        self.assertFalse(
+            validate_grib_step_types(
+                {"tp": "accum", "tsr": None, "ttr": "accum"},
+                expected="accum",
+                dataset_label="surface",
+            )
+        )
         with self.assertRaisesRegex(ValueError, "GRIB_stepType"):
             validate_grib_step_types(
                 {"tp": "instant"},
