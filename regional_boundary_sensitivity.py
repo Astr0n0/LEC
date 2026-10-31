@@ -3,6 +3,7 @@ import pandas as pd
 from scipy.stats import spearmanr
 
 from analysis_config import get_analysis_timeseries_path
+from temporal_validation import complete_daily_windows
 
 df = pd.read_csv(
     get_analysis_timeseries_path(),
@@ -74,13 +75,10 @@ for threshold in thresholds:
 
 print("\n=== DAILY SENSITIVITY ===")
 
-daily = (
+daily = complete_daily_windows(
     df.set_index("time")[
         ["dE_L_dt", "B_total", "R_total", "R_n", "Z"]
     ]
-    .resample("D")
-    .mean()
-    .dropna()
 )
 
 daily["gamma_total"] = (
