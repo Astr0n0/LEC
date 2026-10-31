@@ -125,6 +125,28 @@ def validate_extended_inputs() -> None:
     ):
         raise ValueError("Extended surface NetCDF failed validation.")
 
+    with xr.open_dataset(PRESSURE_EXTENDED) as pressure_ds, xr.open_dataset(SURFACE_EXTENDED) as surface_ds:
+        for coordinate, expected_size, expected_min, expected_max in (
+            ("latitude", 101, -42.5, -17.5),
+            ("longitude", 121, -60.0, -30.0),
+        ):
+            pressure_values = pressure_ds[coordinate].values
+            surface_values = surface_ds[coordinate].values
+            if not np.array_equal(pressure_values, surface_values):
+                raise ValueError(f"Pressure and surface {coordinate} grids differ.")
+            if pressure_values.size != expected_size:
+                raise ValueError(
+                    f"Unexpected {coordinate} grid size: {pressure_values.size}; "
+                    f"expected {expected_size}."
+                )
+            if not (
+                np.isclose(float(np.min(pressure_values)), expected_min)
+                and np.isclose(float(np.max(pressure_values)), expected_max)
+            ):
+                raise ValueError(f"Unexpected {coordinate} domain bounds.")
+            if not np.allclose(np.abs(np.diff(pressure_values)), 0.25):
+                raise ValueError(f"{coordinate} grid spacing is not 0.25 degrees.")
+
     with xr.open_dataset(PRESSURE_EXTENDED) as ds:
         validate_variable_units(
             {name: ds[name].attrs.get("units", "") for name in PRESSURE_UNITS},
