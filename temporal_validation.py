@@ -147,4 +147,13 @@ def complete_daily_windows(
         finite = np.isfinite(daily_mean[numeric_cols]).all(axis=1)
         complete &= finite
 
-    return daily_mean.loc[complete].copy()
+    result = daily_mean.loc[complete].copy()
+    if len(result) > 1:
+        result_intervals = result.index.to_series().diff().dropna()
+        if not result_intervals.eq(pd.Timedelta(days=1)).all():
+            raise ValueError(
+                "Complete daily windows are not contiguous. An incomplete "
+                "interior day would otherwise compress the time axis and "
+                "invalidate time-series resampling or circular-shift tests."
+            )
+    return result
