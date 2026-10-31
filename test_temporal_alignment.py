@@ -218,7 +218,7 @@ class TemporalAlignmentTests(unittest.TestCase):
             {"Z": [1.0, 2.0, 4.0]},
             index=times[[0, 2, 3]],
         )
-        with self.assertRaisesRegex(ValueError, "must exactly match"):
+        with self.assertRaisesRegex(ValueError, "timestamps"):
             build_analysis(energy_gamma, precipitation)
 
     def test_conditional_pdf_normalizes_over_nonnegative_precipitation(self):
