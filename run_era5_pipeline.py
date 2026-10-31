@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+"""Run the reproducible 100-day ERA5-to-LEC analysis pipeline."""
+
+from __future__ import annotations
+
+import argparse
+import importlib.metadata
+import json
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pandas as pd
+import xarray as xr
+
+
+ROOT = Path(__file__).resolve().parent
+START = pd.Timestamp("2020-01-01 00:00:00")
+PRESSURE_EXTENDED = ROOT / "era5_100d_extended.nc"
+SURFACE_EXTENDED = ROOT / "era5_surface_100d_extended.nc"
+LEC_RESULTS = ROOT / "era5_100d_extended_fixed" / "paper_lec.csv"
+RADIATION_CSV = ROOT / "radiation_100d_extended.csv"
+PRECIPITATION_CSV = ROOT / "precipitation_100d_extended.csv"
+SIX_HOURLY_OUTPUT = ROOT / "LEC_100d_extended_analysis"
+DAILY_OUTPUT = ROOT / "LEC_100d_extended_daily_analysis"
+LOG_DIR = SIX_HOURLY_OUTPUT / "pipeline_logs"
+
+DIAGNOSTICS = [
+    "regional_energy_budget_check.py",
+    "lec_derivative_consistency.py",
+    "lec_output_consistency.py",
+    "regional_boundary_sensitivity.py",
+    "block_bootstrap_correlation.py",
+    "block_bootstrap_sensitivity.py",
+    "circular_shift_test.py",
+    "rn_threshold_sensitivity.py",
+    "gamma_distribution_check.py",
+    "gamma_outlier_diagnosis.py",
+    "autocorrelation_diagnostics.py",
+    "robust_correlation_check.py",
+]
+
+
+def run_step(name: str, command: list[str], *, required: bool = True) -> dict[str, object]:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"\n=== {name} ===")
+    print("Command:", " ".join(command))
+    completed = subprocess.run(
+        command,
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    log_path = LOG_DIR / f"{name.lower().replace(' ', '_')}.log"
+    log_path.write_text(
+        completed.stdout
+        + ("\n\n--- STDERR ---\n" + completed.stderr if completed.stderr else ""),
+        encoding="utf-8",
+    )
+    status = "success" if completed.returncode == 0 else "failed"
+    print(f"{status.upper()}: {log_path}")
+    if completed.returncode != 0:
+        print("\n".join((completed.stderr or completed.stdout).splitlines()[-15:]))
+        if required:
+            raise RuntimeError(f"Required pipeline step failed: {name}")
+    return {
+        "name": name,
+        "status": status,
+        "return_code": completed.returncode,
+        "log": str(log_path.relative_to(ROOT)),
+    }
+
+
+def _valid_extended_file(
+    path: Path,
+    *,
+    expected_times: pd.DatetimeIndex,
+    required_variables: set[str],
+    pressure_levels: list[int] | None = None,
+) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        with xr.open_dataset(path) as ds:
+            if "valid_time" not in ds.coords:
+                return False
+            if not required_variables.issubset(ds.data_vars):
+                return False
+            if not pd.DatetimeIndex(ds["valid_time"].values).equals(expected_times):
+                return False
+            if pressure_levels is not None:
+                if "pressure_level" not in ds.coords:
+                    return False
+                if list(map(int, ds["pressure_level"].values)) != pressure_levels:
+                    return False
+        return True
+    except Exception:
+        return False
+
+
+def validate_extended_inputs() -> None:
+    pressure_times = pd.date_range(START, periods=401, freq="6h")
+    surface_times = pd.date_range(START, periods=2401, freq="h")
+    if not _valid_extended_file(
+        PRESSURE_EXTENDED,
+        expected_times=pressure_times,
+        required_variables={"z", "t", "u", "v", "w"},
+        pressure_levels=[1000, 850, 700, 500, 300, 200, 100],
+    ):
+        raise ValueError("Extended pressure-level NetCDF failed validation.")
+    if not _valid_extended_file(
+        SURFACE_EXTENDED,
+        expected_times=surface_times,
+        required_variables={"tsr", "ttr", "tp"},
+    ):
+        raise ValueError("Extended surface NetCDF failed validation.")
+
+
+def validate_lec_results(path: Path) -> None:
+    if not path.is_file():
+        raise FileNotFoundError(f"LorenzCycleToolkit result not found: {path}")
+    df = pd.read_csv(path)
+    time_candidates = [
+        c for c in df.columns
+        if c.lower() in {"time", "valid_time", "date", "datetime", "timestamp"}
+    ]
+    time_col = time_candidates[0] if time_candidates else df.columns[0]
+    times = pd.DatetimeIndex(pd.to_datetime(df[time_col], errors="raise"))
+    expected = pd.date_range(START, periods=401, freq="6h")
+    if not times.equals(expected):
+        raise ValueError(
+            "LorenzCycleToolkit output must contain 401 regular six-hourly "
+            "states from 2020-01-01 00 through 2020-04-10 00 UTC."
+        )
+    missing = {"Az", "Ae", "Kz", "Ke"}.difference(df.columns)
+    if missing:
+        raise ValueError(f"LorenzCycleToolkit output is missing {sorted(missing)}.")
+    if df[["Az", "Ae", "Kz", "Ke"]].isna().any().any():
+        raise ValueError("LorenzCycleToolkit output contains missing energy reservoirs.")
+
+
+def validate_analysis_output(path: Path, *, daily: bool) -> int:
+    if not path.is_file():
+        raise FileNotFoundError(f"Analysis output not found: {path}")
+    df = pd.read_csv(path)
+    times = pd.DatetimeIndex(pd.to_datetime(df["time"], errors="raise"))
+    if daily:
+        expected = pd.date_range("2020-01-02 00:00", periods=100, freq="D")
+    else:
+        expected = pd.date_range("2020-01-01 06:00", periods=400, freq="6h")
+    if not times.equals(expected):
+        raise ValueError(
+            f"{path} has {len(times)} rows but does not match the expected "
+            f"{'100 daily' if daily else '400 six-hourly'} interval-ending timeline."
+        )
+    return len(df)
+
+
+def _package_version(name: str) -> str | None:
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Run endpoint extension, ERA5 processing, LEC, and statistical diagnostics."
+    )
+    parser.add_argument(
+        "--min-abs-rn",
+        type=float,
+        default=0.5,
+        help="Mask gamma when |Rn| is below this threshold in W/m2.",
+    )
+    parser.add_argument(
+        "--skip-diagnostics",
+        action="store_true",
+        help="Run the validated data/LEC pipeline but skip bootstrap and sensitivity scripts.",
+    )
+    args = parser.parse_args()
+
+    if not PRESSURE_EXTENDED.exists() or not SURFACE_EXTENDED.exists():
+        run_step(
+            "Extend ERA5 endpoints",
+            [sys.executable, "extend_era5_100d.py"],
+        )
+    else:
+        print("Extended ERA5 NetCDF files already exist; checking exact timelines.")
+
+    validate_extended_inputs()
+
+    run_step(
+        "Prepare ERA5 surface variables",
+        [
+            sys.executable,
+            "prepare_era5_surface.py",
+            "--input-file", str(SURFACE_EXTENDED),
+            "--radiation-output", str(RADIATION_CSV),
+            "--precipitation-output", str(PRECIPITATION_CSV),
+        ],
+    )
+
+    if LEC_RESULTS.exists():
+        validate_lec_results(LEC_RESULTS)
+        print(f"Using validated existing LorenzCycleToolkit output: {LEC_RESULTS}")
+        lec_command = [
+            sys.executable, "LEC_reproduction.py",
+            "--lec-results", str(LEC_RESULTS),
+            "--radiation-csv", str(RADIATION_CSV),
+            "--precipitation-csv", str(PRECIPITATION_CSV),
+            "--min-abs-rn", str(args.min_abs_rn),
+            "--output-dir", str(SIX_HOURLY_OUTPUT),
+        ]
+    else:
+        lec_command = [
+            sys.executable, "LEC_reproduction.py",
+            "--atmospheric-nc", str(PRESSURE_EXTENDED),
+            "--domain", "-60", "-30", "-42.5", "-17.5",
+            "--radiation-csv", str(RADIATION_CSV),
+            "--precipitation-csv", str(PRECIPITATION_CSV),
+            "--min-abs-rn", str(args.min_abs_rn),
+            "--output-dir", str(SIX_HOURLY_OUTPUT),
+        ]
+    run_step("Run six-hourly LEC analysis", lec_command)
+    validate_lec_results(LEC_RESULTS)
+
+    daily_command = [
+        sys.executable, "LEC_reproduction.py",
+        "--lec-results", str(LEC_RESULTS),
+        "--radiation-csv", str(RADIATION_CSV),
+        "--precipitation-csv", str(PRECIPITATION_CSV),
+        "--resample", "D",
+        "--min-abs-rn", str(args.min_abs_rn),
+        "--output-dir", str(DAILY_OUTPUT),
+    ]
+    run_step("Run complete daily LEC analysis", daily_command)
+
+    six_hourly_count = validate_analysis_output(
+        SIX_HOURLY_OUTPUT / "analysis_timeseries.csv", daily=False
+    )
+    daily_count = validate_analysis_output(
+        DAILY_OUTPUT / "analysis_timeseries.csv", daily=True
+    )
+
+    diagnostic_results = []
+    if not args.skip_diagnostics:
+        for script in DIAGNOSTICS:
+            diagnostic_results.append(
+                run_step(
+                    f"Diagnostic {Path(script).stem}",
+                    [sys.executable, script],
+                    required=False,
+                )
+            )
+
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        ).stdout.strip() or None
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        ).stdout.strip() or None
+    except Exception:
+        commit, branch = None, None
+
+    manifest = {
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "git_branch": branch,
+        "git_commit": commit,
+        "python": sys.version,
+        "packages": {
+            name: _package_version(name)
+            for name in [
+                "numpy", "pandas", "scipy", "matplotlib", "xarray",
+                "netCDF4", "LorenzCycleToolkit", "cdsapi",
+            ]
+        },
+        "inputs": {
+            "pressure_netcdf": str(PRESSURE_EXTENDED.name),
+            "surface_netcdf": str(SURFACE_EXTENDED.name),
+            "lec_results": str(LEC_RESULTS.relative_to(ROOT)),
+            "radiation_csv": str(RADIATION_CSV.name),
+            "precipitation_csv": str(PRECIPITATION_CSV.name),
+        },
+        "analysis": {
+            "six_hourly_samples": six_hourly_count,
+            "complete_daily_samples": daily_count,
+            "daily_window": "(previous midnight, current midnight]",
+            "min_abs_rn_W_m2": args.min_abs_rn,
+            "gamma": "interval-ending dE_L/dt divided by R_n",
+        },
+        "diagnostics": diagnostic_results,
+    }
+    SIX_HOURLY_OUTPUT.mkdir(parents=True, exist_ok=True)
+    manifest_path = SIX_HOURLY_OUTPUT / "pipeline_manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    failures = [x for x in diagnostic_results if x["status"] != "success"]
+    print("\nPIPELINE COMPLETE")
+    print("Six-hourly samples:", six_hourly_count)
+    print("Complete daily samples:", daily_count)
+    print("Manifest:", manifest_path)
+    print("Diagnostic failures:", len(failures))
+    if failures:
+        print("See pipeline_logs and diagnostics_summary.txt for individual logs.")
+        summary_path = LOG_DIR / "diagnostics_summary.txt"
+        summary_path.write_text(
+            "\n".join(
+                f"{x['name']}: {x['status']} (exit {x['return_code']}) - {x['log']}"
+                for x in diagnostic_results
+            ),
+            encoding="utf-8",
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
