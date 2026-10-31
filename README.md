@@ -186,6 +186,7 @@ Provide a time column and one of `Z`, `precipitation`, `precip`, `tp`, or `preci
 - `psi.csv`
 - `conditional_cdf.csv`
 - `precipitation_exceedance_probability.csv`
+- `precipitation_exceedance_timeseries.csv` (threshold exceedance probabilities mapped to each observation; no extrapolation outside the KDE gamma grid)
 - `precipitation_exceedance_timeseries.csv`
 - `analysis_metadata.json`
 - `01_time_series.png`
