@@ -27,10 +27,10 @@ require differencing.
 
 Official references:
 
-- [ECMWF/Copernicus accumulated-variable conversion table](https://confluence.ecmwf.int/pages/viewpage.action?pageId=253727898)
+- [ECMWF/Copernicus accumulated-variable conversion table](https://confluence.ecmwf.int/pages/viewpage.action?pageId=212460134)
 - [ECMWF parameter 178: top net solar radiation (tsr)](https://codes.ecmwf.int/grib/param-db/178)
 - [ECMWF parameter 179: top net thermal radiation (ttr)](https://codes.ecmwf.int/grib/param-db/?id=179)
-- [ERA5 data documentation and variable inventory](https://confluence.ecmwf.int/pages/viewpage.action?pageId=496875006)
+- [ERA5 data documentation and variable inventory](https://confluence.ecmwf.int/pages/viewpage.action?pageId=669811810)
 
 The ECMWF vertical-flux convention is positive downwards. Thus tsr is
 normally positive and ttr is normally negative. Their sum is net incoming
