@@ -231,7 +231,7 @@ class TemporalAlignmentTests(unittest.TestCase):
             gamma, z, gamma_points=40, z_points=160
         )
         integrals = np.trapezoid(conditional, z_grid, axis=0)
-        np.testing.assert_allclose(integrals, np.ones_like(integrals), atol=0.02)
+        np.testing.assert_allclose(integrals, np.ones_like(integrals), atol=1e-6)
 
 
     def test_daily_resampling_rejects_an_interior_missing_day(self):
