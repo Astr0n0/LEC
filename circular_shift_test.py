@@ -113,7 +113,7 @@ daily = load_interval_analysis(
 
 gamma = daily["gamma"].to_numpy(dtype=float)
 z = daily["Z"].to_numpy(dtype=float)
-rn = daily["Rn"].to_numpy(dtype=float)
+rn = daily["R_n"].to_numpy(dtype=float)
 n = len(daily)
 
 if n < MIN_N:
