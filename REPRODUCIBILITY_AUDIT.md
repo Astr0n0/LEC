@@ -1113,3 +1113,42 @@ actual NetCDF-to-LEC pipeline. Until that run is complete, the old pilot
 correlations and bootstrap estimates remain historical results and must
 not be presented as the final interval-aligned 100-day analysis.
 
+
+
+---
+
+## 22. Conditional precipitation probability outputs
+
+The paper defines the conditional density P(Z,t | gamma,t) and, in Eq. 40,
+defines the PDF ratio:
+
+    Psi(Z, gamma; t) = P(Z, t | gamma, t) / P(gamma, t)
+
+These two objects must not be conflated. The conditional density is a
+probability density over precipitation amounts; integrating it over an
+interval [z1, z2] gives the probability that precipitation lies in that
+interval, conditional on gamma. The Eq. 40 quantity Psi is a ratio of
+densities. Although the paper describes it as representing a probability,
+it is not itself a normalized event probability.
+
+The analysis now saves both the paper's PDF ratio and proper conditional
+event-probability outputs:
+
+- conditional_pdf.csv: p(Z | gamma)
+- conditional_cdf.csv: P(Z <= z | gamma)
+- precipitation_exceedance_probability.csv: P(Z > z_threshold | gamma)
+  for every precipitation threshold on the saved Z grid
+- psi.csv: the Eq. 40 density ratio
+
+No wet-day or heavy-precipitation threshold is hard-coded because the paper
+does not specify one. A researcher can select a physically meaningful
+threshold and read the corresponding exceedance probability from the
+saved matrix. This also avoids reporting the PDF ratio as though it were
+the probability of a precipitation event.
+
+The CDF and exceedance outputs are numerically integrated from the
+non-negative-support conditional KDE and normalized over the displayed
+precipitation grid. They are in-sample descriptive probabilities; they do
+not constitute out-of-sample forecast skill. Any claim of predictive skill
+requires blocked out-of-sample validation and probability calibration.
+
