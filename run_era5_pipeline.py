@@ -386,6 +386,12 @@ def main() -> int:
             "grid_resolution_degrees": 0.25,
             "grid_shape_lat_lon": [101, 121],
         },
+        "time_coverage_utc": {
+            "pressure_states": ["2020-01-01 00:00", "2020-04-10 00:00"],
+            "surface_hourly_records": ["2020-01-01 00:00", "2020-04-10 00:00"],
+            "six_hour_interval_ends": ["2020-01-01 06:00", "2020-04-10 00:00"],
+            "daily_window_labels": ["2020-01-02 00:00", "2020-04-10 00:00"],
+        },
         "analysis": {
             "six_hourly_samples": six_hourly_count,
             "complete_daily_samples": daily_count,
