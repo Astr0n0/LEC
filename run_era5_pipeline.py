@@ -216,6 +216,7 @@ def validate_analysis_output(path: Path, *, daily: bool) -> int:
         "psi.csv",
         "conditional_cdf.csv",
         "precipitation_exceedance_probability.csv",
+        "precipitation_exceedance_timeseries.csv",
         "analysis_metadata.json",
     ]
     missing_outputs = [
