@@ -339,8 +339,7 @@ def main() -> int:
     print("Complete daily samples:", daily_count)
     print("Manifest:", manifest_path)
     print("Diagnostic failures:", len(failures))
-    if failures:
-        print("See pipeline_logs and diagnostics_summary.txt for individual logs.")
+    if diagnostic_results:
         summary_path = LOG_DIR / "diagnostics_summary.txt"
         summary_path.write_text(
             "\n".join(
@@ -349,6 +348,8 @@ def main() -> int:
             ),
             encoding="utf-8",
         )
+    if failures:
+        print("See pipeline_logs/diagnostics_summary.txt for individual logs.")
     return 0
 
 
