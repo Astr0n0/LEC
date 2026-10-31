@@ -872,7 +872,7 @@ def main() -> int:
         "last_timestamp": str(result.frame.index.max()),
         "kde_gamma_percentile_filter": [1, 99],
         "kde_precipitation_support_mm_day": [0.0, float(result.z_grid[-1])],
-        "conditional_pdf_normalization": "non-negative precipitation support",
+        "conditional_pdf_normalization": "exact trapezoidal normalization over the saved non-negative Z grid",
         "probability_output": "P(Z > z_threshold | gamma), with every Z threshold on the saved grid",
         "psi_interpretation": "PDF ratio from paper Eq. 40; not itself an event probability",
         "zero_precipitation_treatment": "continuous KDE; no point mass at exactly zero is estimated",
