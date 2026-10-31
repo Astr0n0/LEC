@@ -29,7 +29,7 @@ jobs:
 
       - name: Compile project entry points
         run: >-
-          python -m compileall -q LEC_reproduction.py era5_analysis.py
+          python -m compileall -q analysis_config.py LEC_reproduction.py era5_analysis.py
           era5_surface_processing.py prepare_era5_surface.py
           extend_era5_100d.py block_bootstrap_correlation.py
           block_bootstrap_sensitivity.py circular_shift_test.py
