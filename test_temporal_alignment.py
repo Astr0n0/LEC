@@ -289,5 +289,24 @@ class TemporalAlignmentTests(unittest.TestCase):
         self.assertTrue(np.isfinite(result.correlation))
 
 
+    def test_daily_resampling_uses_required_columns_not_optional_diagnostics(self):
+        times = pd.date_range("2020-01-01 06:00", periods=4, freq="6h")
+        frame = pd.DataFrame(
+            {
+                "dE_L_dt": [1.0, 2.0, 3.0, 4.0],
+                "optional_boundary_term": [1.0, np.nan, 3.0, 4.0],
+            },
+            index=times,
+        )
+        daily = _resample_if_requested(
+            frame, "D", required_columns=["dE_L_dt"]
+        )
+        self.assertEqual(len(daily), 1)
+        self.assertAlmostEqual(daily["dE_L_dt"].iloc[0], 2.5)
+        self.assertAlmostEqual(
+            daily["optional_boundary_term"].iloc[0], 8.0 / 3.0
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
