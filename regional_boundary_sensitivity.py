@@ -2,8 +2,10 @@
 import pandas as pd
 from scipy.stats import spearmanr
 
+from analysis_config import get_analysis_timeseries_path
+
 df = pd.read_csv(
-    r"LEC_100d_real\analysis_timeseries.csv",
+    get_analysis_timeseries_path(),
     parse_dates=["time"],
 )
 
