@@ -16,7 +16,7 @@ If PowerShell blocks activation, invoke .venv\Scripts\python.exe directly or use
 ## Tests
 Run from the repository root:
 
-    python -m compileall -q .
+    python -m compileall -q analysis_config.py era5_metadata.py era5_surface_processing.py temporal_validation.py era5_analysis.py LEC_reproduction.py prepare_era5_surface.py extend_era5_100d.py run_era5_pipeline.py
     python -m unittest discover -v
 
 Tests must not require CDS credentials or download ERA5 data. Keep network retrieval and real-data integration checks separate from deterministic unit tests.
