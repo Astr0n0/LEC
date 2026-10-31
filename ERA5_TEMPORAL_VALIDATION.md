@@ -109,3 +109,23 @@ that the regional experiment is a global atmospheric energy budget, nor
 does it establish a physical or statistical relationship between gamma and
 precipitation. Those require separate validation of the LEC domain,
 boundary terms, sampling, and statistical model.
+
+
+## Pressure-level units and metadata checks
+
+The pressure-level variables used by LorenzCycleToolkit are expected to have
+the following ERA5 units:
+
+| Variable | Meaning | Expected units |
+|---|---|---|
+| z | Geopotential | m² s⁻² |
+| t | Air temperature | K |
+| u | Eastward wind | m s⁻¹ |
+| v | Northward wind | m s⁻¹ |
+| w | Vertical velocity | Pa s⁻¹ |
+
+The pipeline validates these units, as well as surface units, before running
+the calculations. If GRIB_stepType metadata is present, pressure-level
+variables must be instantaneous and surface accumulation variables must
+be marked as accumulations. Missing GRIB_stepType attributes are reported
+as unverified metadata rather than silently interpreted as another step type.
