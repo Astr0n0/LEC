@@ -434,24 +434,19 @@ def align_energy_and_radiation(
 
     rn = merged["R_n"].to_numpy(dtype=float)
     tendency = merged["dE_L_dt"].to_numpy(dtype=float)
-    bad_rn = ~np.isfinite(rn) | (np.abs(rn) < min_abs_rn)
-    bad_tendency = ~np.isfinite(tendency)
-    bad = bad_rn | bad_tendency
-    if bad.any():
-        print(
-            f"Warning: excluding {int(bad.sum())} samples from gamma because "
-            "the radiation denominator is unstable/non-finite or the "
-            "energy tendency is non-finite. Their timestamps are not shifted."
-        )
-        merged = merged.loc[~bad].copy()
+    stable = np.isfinite(rn) & (np.abs(rn) >= min_abs_rn) & np.isfinite(tendency)
 
-    if len(merged) < 3:
+    # Keep the complete chronological index. A small/unstable denominator
+    # masks gamma at that timestamp; it must not remove the timestamp and
+    # compress the time series used by downstream diagnostics.
+    merged["gamma"] = np.nan
+    merged.loc[stable, "gamma"] = (
+        merged.loc[stable, "dE_L_dt"] / merged.loc[stable, "R_n"]
+    )
+    if int(stable.sum()) < 3:
         raise ValueError("Too few valid samples remain after radiation alignment")
-
-    merged["gamma"] = merged["dE_L_dt"] / merged["R_n"]
-    if not np.isfinite(merged["gamma"].to_numpy(dtype=float)).all():
-        raise ValueError("gamma contains non-finite values")
     return merged
+
 
 
 def simulate_precipitation_from_gamma(
@@ -571,22 +566,27 @@ def build_analysis(
     precip = precip.reindex(energy_gamma.index)
     frame = energy_gamma.join(precip[["Z"]], how="left", validate="one_to_one")
     frame = frame.replace([np.inf, -np.inf], np.nan)
-    if frame[["gamma", "Z"]].isna().any().any():
+    if frame["Z"].isna().any() or not np.isfinite(frame["Z"].to_numpy(dtype=float)).all():
+        raise ValueError("Aligned precipitation contains missing or non-finite values.")
+
+    valid_pairs = np.isfinite(frame["gamma"].to_numpy(dtype=float)) & np.isfinite(
+        frame["Z"].to_numpy(dtype=float)
+    )
+    if int(valid_pairs.sum()) < 20:
         raise ValueError(
-            "The aligned analysis contains missing gamma or precipitation "
-            "values. Resolve the missing observations instead of silently "
-            "dropping timestamps."
-        )
-    if len(frame) < 20:
-        raise ValueError(
-            f"Only {len(frame)} common gamma/precipitation samples are available; need at least 20"
+            f"Only {int(valid_pairs.sum())} finite gamma/precipitation pairs are available; need at least 20"
         )
 
-    corr = float(frame["gamma"].corr(frame["Z"]))
+    # Statistical summaries use pairwise-valid values, while frame retains
+    # all original timestamps and masked gamma values for time-series work.
+    valid_frame = frame.loc[valid_pairs]
+    corr = float(valid_frame["gamma"].corr(valid_frame["Z"]))
     z_grid, gamma_grid, cond, psi = estimate_conditional_pdf(
-        frame["gamma"].to_numpy(), frame["Z"].to_numpy()
+        valid_frame["gamma"].to_numpy(), valid_frame["Z"].to_numpy()
     )
     return AnalysisResult(frame, z_grid, gamma_grid, cond, psi, corr)
+
+
 
 
 def _save_figure(fig: plt.Figure, path: Path) -> None:

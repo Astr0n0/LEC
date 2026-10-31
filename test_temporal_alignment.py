@@ -251,5 +251,42 @@ class TemporalAlignmentTests(unittest.TestCase):
             complete_daily_windows(frame)
 
 
+    def test_alignment_preserves_timestamps_with_unstable_radiation(self):
+        from LEC_reproduction import align_energy_and_radiation
+
+        times = pd.date_range("2020-01-01 00:00", periods=5, freq="6h")
+        lec = pd.DataFrame(
+            {"dE_L_dt": [np.nan, 1.0, 1.0, 1.0, 1.0]},
+            index=times,
+        )
+        radiation = pd.DataFrame(
+            {"R_n": [100.0, 0.1, 100.0, 100.0]},
+            index=times[1:],
+        )
+        result = align_energy_and_radiation(lec, radiation, min_abs_rn=0.5)
+        self.assertEqual(list(result.index), list(times[1:]))
+        self.assertTrue(np.isnan(result.loc[times[2], "gamma"]))
+        self.assertTrue(np.isfinite(result.loc[times[1], "gamma"]))
+
+    def test_build_analysis_keeps_masked_gamma_timestamps(self):
+        from LEC_reproduction import build_analysis
+
+        times = pd.date_range("2020-01-01 06:00", periods=30, freq="6h")
+        gamma = np.linspace(-0.2, 0.2, len(times))
+        gamma[10] = np.nan
+        energy_gamma = pd.DataFrame(
+            {"dE_L_dt": 1.0, "R_n": 100.0, "gamma": gamma},
+            index=times,
+        )
+        precipitation = pd.DataFrame(
+            {"Z": np.linspace(0.1, 5.0, len(times))},
+            index=times,
+        )
+        result = build_analysis(energy_gamma, precipitation)
+        self.assertEqual(len(result.frame), len(times))
+        self.assertTrue(np.isnan(result.frame["gamma"].iloc[10]))
+        self.assertTrue(np.isfinite(result.correlation))
+
+
 if __name__ == "__main__":
     unittest.main()
