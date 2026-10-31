@@ -871,6 +871,8 @@ def main() -> int:
         "conditional_pdf_normalization": "non-negative precipitation support",
         "probability_output": "P(Z > z_threshold | gamma), with every Z threshold on the saved grid",
         "psi_interpretation": "PDF ratio from paper Eq. 40; not itself an event probability",
+        "zero_precipitation_treatment": "continuous KDE; no point mass at exactly zero is estimated",
+        "wet_day_probability": "requires a separately specified wet-day threshold and binary or hurdle model",
         "random_seed": args.seed,
     }
     for package in ("numpy", "pandas", "scipy", "matplotlib", "xarray", "LorenzCycleToolkit"):
