@@ -694,7 +694,7 @@ def parse_args() -> argparse.Namespace:
         "--min-abs-rn",
         type=float,
         default=0.5,
-        help="Drop samples with |Rn| below this W/m^2 threshold (default 0.5)",
+        help="Mask gamma when |Rn| is below this W/m^2 threshold; timestamps are retained (default 0.5)",
     )
     parser.add_argument("--output-dir", type=Path, default=Path("LEC_paper_results"))
     parser.add_argument("--seed", type=int, default=42)
@@ -760,7 +760,9 @@ def main() -> int:
 
     summary = pd.Series(
         {
-            "n_samples": len(result.frame),
+            "n_samples_total": len(result.frame),
+            "n_gamma_valid": int(np.isfinite(result.frame["gamma"]).sum()),
+            "n_gamma_masked": int(result.frame["gamma"].isna().sum()),
             "pearson_r_gamma_Z": result.correlation,
             "gamma_mean": result.frame["gamma"].mean(),
             "gamma_std": result.frame["gamma"].std(),
