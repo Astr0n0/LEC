@@ -236,8 +236,8 @@ class TemporalAlignmentTests(unittest.TestCase):
 
     def test_daily_resampling_rejects_an_interior_missing_day(self):
         times = pd.date_range("2020-01-01 06:00", "2020-01-04 00:00", freq="6h")
-        times = times.delete(5)
         frame = pd.DataFrame({"x": np.arange(len(times), dtype=float)}, index=times)
+        frame.loc[times[5], "x"] = np.nan
         with self.assertRaisesRegex(ValueError, "not contiguous"):
             _resample_if_requested(frame, "D")
 
@@ -245,8 +245,8 @@ class TemporalAlignmentTests(unittest.TestCase):
         from temporal_validation import complete_daily_windows
 
         times = pd.date_range("2020-01-01 06:00", "2020-01-04 00:00", freq="6h")
-        times = times.delete(5)
         frame = pd.DataFrame({"x": np.arange(len(times), dtype=float)}, index=times)
+        frame.loc[times[5], "x"] = np.nan
         with self.assertRaisesRegex(ValueError, "not contiguous"):
             complete_daily_windows(frame)
 
