@@ -34,6 +34,7 @@ from typing import Optional
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from scipy.integrate import cumulative_trapezoid
 from scipy.stats import gaussian_kde
 
 from temporal_validation import validate_regular_time_index
@@ -77,6 +78,8 @@ class AnalysisResult:
     gamma_grid: np.ndarray
     conditional_pdf: np.ndarray
     psi: np.ndarray
+    conditional_cdf: np.ndarray
+    exceedance_probability: np.ndarray
     correlation: float
 
 
@@ -570,6 +573,30 @@ def estimate_conditional_pdf(
     return z_grid, gamma_grid, conditional, psi
 
 
+def conditional_probabilities(
+    z_grid: np.ndarray,
+    conditional_pdf: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return F(Z|gamma) and P(Z > z_threshold | gamma) on the KDE grid."""
+    z_grid = np.asarray(z_grid, dtype=float)
+    density = np.asarray(conditional_pdf, dtype=float)
+    if z_grid.ndim != 1 or density.ndim != 2 or density.shape[0] != z_grid.size:
+        raise ValueError("Conditional PDF dimensions do not match the Z grid.")
+    if z_grid.size < 2 or not np.all(np.diff(z_grid) > 0):
+        raise ValueError("Z grid must be strictly increasing with at least two points.")
+    if not np.isfinite(density).all() or np.any(density < 0):
+        raise ValueError("Conditional PDF must be finite and non-negative.")
+
+    cdf = cumulative_trapezoid(density, z_grid, axis=0, initial=0.0)
+    final_mass = cdf[-1, :]
+    if np.any(~np.isfinite(final_mass)) or np.any(final_mass <= 0):
+        raise ValueError("Conditional PDF has invalid integrated probability mass.")
+    cdf = cdf / final_mass[np.newaxis, :]
+    cdf = np.maximum.accumulate(np.clip(cdf, 0.0, 1.0), axis=0)
+    exceedance = np.clip(1.0 - cdf, 0.0, 1.0)
+    return cdf, exceedance
+
+
 def build_analysis(
     energy_gamma: pd.DataFrame,
     precipitation: pd.DataFrame,
@@ -603,7 +630,11 @@ def build_analysis(
     z_grid, gamma_grid, cond, psi = estimate_conditional_pdf(
         valid_frame["gamma"].to_numpy(), valid_frame["Z"].to_numpy()
     )
-    return AnalysisResult(frame, z_grid, gamma_grid, cond, psi, corr)
+    conditional_cdf, exceedance = conditional_probabilities(z_grid, cond)
+    return AnalysisResult(
+        frame, z_grid, gamma_grid, cond, psi,
+        conditional_cdf, exceedance, corr
+    )
 
 
 
@@ -651,6 +682,19 @@ def create_plots(result: AnalysisResult, output_dir: Path) -> None:
     ax.set_ylabel("Z [mm/day]")
     ax.set_title("PDF Ratio Psi(Z, gamma)")
     _save_figure(fig, output_dir / "04_pdf_ratio_psi.png")
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    cf = ax.contourf(
+        result.gamma_grid,
+        result.z_grid,
+        result.exceedance_probability,
+        levels=np.linspace(0.0, 1.0, 21),
+    )
+    fig.colorbar(cf, ax=ax, label="P(Z > threshold | gamma)")
+    ax.set_xlabel("gamma [-]")
+    ax.set_ylabel("Precipitation threshold [mm/day]")
+    ax.set_title("Conditional precipitation exceedance probability")
+    _save_figure(fig, output_dir / "06_precipitation_exceedance_probability.png")
 
     bins = np.linspace(float(df["gamma"].min()), float(df["gamma"].max()), 15)
     cats = pd.cut(df["gamma"], bins=bins, include_lowest=True)
@@ -787,6 +831,20 @@ def main() -> int:
     )
     conditional_frame.to_csv(output_dir / "conditional_pdf.csv")
     psi_frame.to_csv(output_dir / "psi.csv")
+    cdf_frame = pd.DataFrame(
+        result.conditional_cdf,
+        index=pd.Index(result.z_grid, name="Z_threshold_mm_day"),
+        columns=pd.Index(result.gamma_grid, name="gamma"),
+    )
+    exceedance_frame = pd.DataFrame(
+        result.exceedance_probability,
+        index=pd.Index(result.z_grid, name="Z_threshold_mm_day"),
+        columns=pd.Index(result.gamma_grid, name="gamma"),
+    )
+    cdf_frame.to_csv(output_dir / "conditional_cdf.csv")
+    exceedance_frame.to_csv(
+        output_dir / "precipitation_exceedance_probability.csv"
+    )
     create_plots(result, output_dir)
 
     valid_gamma = np.isfinite(result.frame["gamma"].to_numpy(dtype=float))
@@ -811,6 +869,8 @@ def main() -> int:
         "kde_gamma_percentile_filter": [1, 99],
         "kde_precipitation_support_mm_day": [0.0, float(result.z_grid[-1])],
         "conditional_pdf_normalization": "non-negative precipitation support",
+        "probability_output": "P(Z > z_threshold | gamma), with every Z threshold on the saved grid",
+        "psi_interpretation": "PDF ratio from paper Eq. 40; not itself an event probability",
         "random_seed": args.seed,
     }
     for package in ("numpy", "pandas", "scipy", "matplotlib", "xarray", "LorenzCycleToolkit"):
