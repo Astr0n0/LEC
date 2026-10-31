@@ -1102,7 +1102,9 @@ The repository now includes:
 
 The automated tests cover interval-ending tendencies, exact timestamp
 alignment, complete daily windows, missing-data gaps, hourly accumulation
-summation, unit conversions, and positive-support KDE normalization.
+summation, unit conversions, GRIB step metadata, positive-support KDE
+normalization, conditional CDF/exceedance calculations, and mapping
+probabilities to each observation without extrapolation.
 
 **Verified:** ERA5 accumulation convention and mathematical transformations.
 
