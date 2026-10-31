@@ -79,4 +79,4 @@ def validate_grib_step_types(
         raise ValueError(
             f"{dataset_label} GRIB_stepType must be {expected!r}; got {wrong}."
         )
-    return True
+    return len(present) == len(step_types)
