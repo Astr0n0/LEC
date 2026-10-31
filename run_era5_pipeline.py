@@ -11,6 +11,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import xarray as xr
 
@@ -93,7 +94,7 @@ def _valid_extended_file(
             if pressure_levels is not None:
                 if "pressure_level" not in ds.coords:
                     return False
-                if list(map(int, ds["pressure_level"].values)) != pressure_levels:
+                if set(map(int, ds["pressure_level"].values)) != set(pressure_levels):
                     return False
         return True
     except Exception:
@@ -137,8 +138,9 @@ def validate_lec_results(path: Path) -> None:
     missing = {"Az", "Ae", "Kz", "Ke"}.difference(df.columns)
     if missing:
         raise ValueError(f"LorenzCycleToolkit output is missing {sorted(missing)}.")
-    if df[["Az", "Ae", "Kz", "Ke"]].isna().any().any():
-        raise ValueError("LorenzCycleToolkit output contains missing energy reservoirs.")
+    reservoirs = df[["Az", "Ae", "Kz", "Ke"]].to_numpy(dtype=float)
+    if not np.isfinite(reservoirs).all():
+        raise ValueError("LorenzCycleToolkit output contains missing or non-finite energy reservoirs.")
 
 
 def validate_analysis_output(path: Path, *, daily: bool) -> int:
@@ -181,6 +183,11 @@ def main() -> int:
         help="Run the validated data/LEC pipeline but skip bootstrap and sensitivity scripts.",
     )
     args = parser.parse_args()
+
+    run_step(
+        "Run automated tests",
+        [sys.executable, "-m", "unittest", "discover", "-v"],
+    )
 
     if not PRESSURE_EXTENDED.exists() or not SURFACE_EXTENDED.exists():
         run_step(
