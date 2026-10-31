@@ -1002,3 +1002,114 @@ At daily resolution, a weak positive rank association can appear under some shor
 Therefore, the current 100-day regional ERA5 experiment does not provide robust statistical support for a strong gamma-precipitation relationship comparable to the paper's reported:
 
 `r = 0.865`
+
+
+---
+
+## 21. ERA5 hourly accumulation contract — verified 2026-10-31
+
+### Dataset identity and official convention
+
+The current surface download script requests the Copernicus dataset
+**reanalysis-era5-single-levels** with **product_type = reanalysis**.
+It does not request ERA5-Land.
+
+The requested surface variables are:
+
+- **tp**: total precipitation, metres of water equivalent
+- **tsr**: top net solar radiation, J m⁻²
+- **ttr**: top net thermal radiation, J m⁻²
+
+ECMWF's documentation defines the hourly ERA5 reanalysis accumulation at
+validity time t as the total accumulated over the preceding one-hour
+processing interval ending at t. Thus records at 01, 02, ..., 06 UTC are
+six distinct one-hour accumulations for (00, 06].
+
+**Conclusion: sum the six hourly records. Do not difference consecutive
+hourly records.** Differencing is associated with other accumulation
+conventions, notably ERA5-Land hourly forecast-step accumulations; it is
+not the correct operation for this ERA5 hourly reanalysis request.
+
+Official references:
+
+- https://confluence.ecmwf.int/pages/viewpage.action?pageId=253727898
+- https://codes.ecmwf.int/grib/param-db/178
+- https://codes.ecmwf.int/grib/param-db/?id=179
+- https://confluence.ecmwf.int/pages/viewpage.action?pageId=496875006
+
+ECMWF uses the downward-positive convention for vertical radiative fluxes.
+tsr is incoming shortwave minus reflected shortwave radiation at TOA.
+ttr is the negative of outgoing longwave radiation (OLR). Therefore
+tsr + ttr is net incoming radiation at TOA and is consistent with the
+paper's Q(1-alpha)-F expression.
+
+The absence of GRIB_startStep, GRIB_endStep and GRIB_stepRange from the
+current NetCDF files is not sufficient reason to redownload the full data:
+the dataset identity, request configuration, variable definitions and
+ECMWF documentation jointly establish the accumulation convention.
+
+### Valid transformations
+
+For each complete six-hour interval ending at t:
+
+    R_n(t) = [sum(tsr) + sum(ttr)] / 21600  W m-2
+    Z(t)   = sum(tp) * 1000 * 4             mm day-1
+
+The existing method of area-averaging hourly fields with cosine-latitude
+weights and then summing the interval accumulations is consistent with the
+linear area and time aggregation.
+
+### Actual coverage and required endpoint
+
+The local audit recorded:
+
+- Pressure levels: 400 states, 2020-01-01 00 through 2020-04-09 18 UTC.
+- Surface: 2400 hourly records, 2020-01-01 00 through 2020-04-09 23 UTC.
+- Processed surface series: 399 complete six-hour intervals, 2020-01-01 06 through 2020-04-09 18 UTC.
+
+Under the required interval-ending convention, complete daily windows are
+right-closed (previous midnight, current midnight] windows containing
+four six-hour intervals. The current data therefore support **99 complete
+daily windows**, labelled 2020-01-02 00 through 2020-04-09 00 UTC. The
+previously saved 100-row daily CSV must not be described as 100 complete
+days without a complete-window count.
+
+To obtain 100 complete daily windows, only the final endpoint is missing:
+
+- One pressure-level state at 2020-04-10 00 UTC.
+- One hourly surface accumulation at 2020-04-10 00 UTC.
+
+The surface records from 2020-04-09 19 through 23 UTC already exist. No
+full-period download is required.
+
+### Code changes and validation status
+
+The repository now includes:
+
+- ERA5_TEMPORAL_VALIDATION.md: full convention, unit and coverage record.
+- era5_surface_processing.py: tested aggregation of hourly accumulations.
+- prepare_era5_surface.py: area-weighted processing with explicit inputs
+  and outputs.
+- extend_era5_100d.py: requests only the two missing endpoint records and
+  writes new extended NetCDF files without modifying the originals.
+- analysis_config.py: selects the extended data set automatically once
+  all extended inputs exist.
+- Strict timestamp matching and non-finite-value validation in the shared
+  and main analysis loaders.
+- Time-axis preservation for small-denominator gamma masks.
+- Rejection of discontinuous daily windows before time-series inference.
+
+The automated tests cover interval-ending tendencies, exact timestamp
+alignment, complete daily windows, missing-data gaps, hourly accumulation
+summation, unit conversions, and positive-support KDE normalization.
+
+**Verified:** ERA5 accumulation convention and mathematical transformations.
+
+**Verified in CI:** software tests and syntax compilation for the pipeline
+entry points (see the latest GitHub Actions run on this branch).
+
+**Pending local validation:** execute the endpoint extension and rerun the
+actual NetCDF-to-LEC pipeline. Until that run is complete, the old pilot
+correlations and bootstrap estimates remain historical results and must
+not be presented as the final interval-aligned 100-day analysis.
+
