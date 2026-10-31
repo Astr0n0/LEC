@@ -167,6 +167,8 @@ Provide a time column and one of `Z`, `precipitation`, `precip`, `tp`, or `preci
 - `summary.csv`
 - `conditional_pdf.csv`
 - `psi.csv`
+- `conditional_cdf.csv`
+- `precipitation_exceedance_probability.csv`
 - `analysis_metadata.json`
 - `01_time_series.png`
 - `02_scatter.png`
@@ -174,6 +176,15 @@ Provide a time column and one of `Z`, `precipitation`, `precip`, `tp`, or `preci
 - `04_pdf_ratio_psi.png`
 - `05_conditional_expectation.png`
 - Toolkit stdout/stderr logs when Toolkit is run by the script
+
+
+The probabilistic outputs are distinct:
+
+- **conditional_pdf.csv** contains the conditional density p(Z | gamma).
+- **conditional_cdf.csv** contains P(Z <= z | gamma).
+- **precipitation_exceedance_probability.csv** contains P(Z > z_threshold | gamma) for every threshold on the saved Z grid. This avoids inventing a wet-day threshold not specified in the paper.
+- **psi.csv** implements the PDF ratio in the paper's Eq. 40. It is a ratio of densities, not itself an event probability.
+
 
 ## ERA5 100-day pilot result — historical values pending rerun
 
