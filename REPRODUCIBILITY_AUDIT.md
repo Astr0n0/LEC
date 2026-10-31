@@ -1032,10 +1032,10 @@ not the correct operation for this ERA5 hourly reanalysis request.
 
 Official references:
 
-- https://confluence.ecmwf.int/pages/viewpage.action?pageId=253727898
+- https://confluence.ecmwf.int/pages/viewpage.action?pageId=212460134
 - https://codes.ecmwf.int/grib/param-db/178
 - https://codes.ecmwf.int/grib/param-db/?id=179
-- https://confluence.ecmwf.int/pages/viewpage.action?pageId=496875006
+- https://confluence.ecmwf.int/pages/viewpage.action?pageId=669811810
 
 ECMWF uses the downward-positive convention for vertical radiative fluxes.
 tsr is incoming shortwave minus reflected shortwave radiation at TOA.
