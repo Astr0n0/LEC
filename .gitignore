@@ -19,3 +19,15 @@ scatter_plot.png
 conditional_pdf.png
 pdf_ratio.png
 conditional_expectation.png
+
+# Extended ERA5 analysis products and local audit files
+radiation_100d_extended.csv
+precipitation_100d_extended.csv
+era5_pressure_endpoint_2020-04-10.nc
+era5_surface_endpoint_2020-04-10.nc
+LEC_100d_extended_analysis/
+LEC_100d_extended_daily_analysis/
+LEC_100d_daily_reproduction_check/
+backup_before_temporal_refactor/
+file_inventory.txt
+local_data_audit.txt
