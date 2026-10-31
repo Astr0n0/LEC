@@ -99,6 +99,23 @@ def _write_box_limits(path: Path, domain: Domain) -> None:
     )
 
 
+def _publish_toolkit_result(
+    result_file: Path,
+    atmospheric_nc: Path,
+    outname: str,
+) -> Path:
+    """Copy a Toolkit CSV to the stable project-level result location."""
+    canonical = (
+        atmospheric_nc.expanduser().resolve().parent
+        / f"{atmospheric_nc.stem}_fixed"
+        / f"{outname}.csv"
+    )
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    if result_file.expanduser().resolve() != canonical.resolve():
+        shutil.copy2(result_file, canonical)
+    return canonical
+
+
 def run_lorenz_cycle_toolkit(
     atmospheric_nc: Path,
     output_dir: Path,
@@ -196,15 +213,9 @@ def run_lorenz_cycle_toolkit(
     # Publish the primary CSV at a stable project-level path. The Toolkit
     # writes into its working directory (LEC_Results/<input>_fixed), while
     # downstream pipeline stages and diagnostics consume this canonical path.
-    canonical_result = (
-        atmospheric_nc.parent
-        / f"{atmospheric_nc.stem}_fixed"
-        / f"{outname}.csv"
+    canonical_result = _publish_toolkit_result(
+        result_file, atmospheric_nc, outname
     )
-    canonical_result.parent.mkdir(parents=True, exist_ok=True)
-    if result_file.resolve() != canonical_result.resolve():
-        shutil.copy2(result_file, canonical_result)
-
     print(f"Toolkit results: {result_file}")
     print(f"Canonical LEC CSV: {canonical_result}")
     return canonical_result
