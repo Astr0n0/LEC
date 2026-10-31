@@ -2,6 +2,28 @@
 
 This folder replaces the placeholder LEC calculation in the supplied `LEC.py` with diagnostics produced by **daniloceano/LorenzCycleToolkit**.
 
+## ERA5 accumulation convention and complete 100-day coverage
+
+The current single-level request is for hourly ERA5 **reanalysis**. ECMWF
+specifies that hourly **tp**, **tsr** and **ttr** values are one-hour
+accumulations ending at each validity timestamp. They are summed over six
+hours; consecutive values are not differenced. The official verification,
+units, sign convention and time-coverage audit are documented in
+[ERA5_TEMPORAL_VALIDATION.md](ERA5_TEMPORAL_VALIDATION.md).
+
+The original files provide 399 complete six-hour surface intervals and
+therefore 99 complete right-closed daily windows. To obtain exactly 100
+complete days, run the following from the project root to fetch only the
+missing 2020-04-10 00:00 UTC pressure-level and surface endpoints:
+
+    python extend_era5_100d.py
+
+The script writes separate extended NetCDF files and never modifies the
+originals. Then run:
+
+    python prepare_era5_surface.py --input-file era5_surface_100d_extended.nc --radiation-output radiation_100d_extended.csv --precipitation-output precipitation_100d_extended.csv
+
+
 ## What changed
 
 The old code estimated `KZ`, `KE`, `PZ`, and `PE` with simple grid variances and temperature squares. Those quantities are not a complete Lorenz Energy Cycle diagnostic. The rewritten workflow uses LorenzCycleToolkit reservoirs:
