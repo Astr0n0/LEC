@@ -79,6 +79,10 @@ def load_interval_analysis(
     precipitation["Z"] = pd.to_numeric(
         precipitation["Z"], errors="raise"
     )
+
+    reservoirs = lec[ENERGY_COLUMNS].replace(
+        [np.inf, -np.inf], np.nan
+    )
     if not np.isfinite(reservoirs.to_numpy(dtype=float)).all():
         raise ValueError("LEC energy reservoirs contain missing or non-finite values.")
     if not np.isfinite(radiation[rn_column].to_numpy(dtype=float)).all():
@@ -87,10 +91,6 @@ def load_interval_analysis(
         raise ValueError("Precipitation contains missing or non-finite values.")
     if (precipitation["Z"] < 0).any():
         raise ValueError("Precipitation contains negative values.")
-
-    reservoirs = lec[ENERGY_COLUMNS].replace(
-        [np.inf, -np.inf], np.nan
-    )
     energy = reservoirs.sum(
         axis=1, min_count=len(ENERGY_COLUMNS)
     ).rename("E_L")
