@@ -391,7 +391,15 @@ def _resample_if_requested(df: pd.DataFrame, frequency: Optional[str]) -> pd.Dat
     counts = resampler.count()
     means = resampler.mean()
     complete = counts.eq(expected).all(axis=1)
-    return means.loc[complete].copy()
+    result = means.loc[complete].copy()
+    if len(result) > 1:
+        result_intervals = result.index.to_series().diff().dropna()
+        if not result_intervals.eq(target_delta).all():
+            raise ValueError(
+                "Complete resampled windows are not contiguous. An interior "
+                "incomplete window would compress the time axis."
+            )
+    return result
 
 
 def align_energy_and_radiation(

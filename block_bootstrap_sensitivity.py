@@ -122,85 +122,23 @@ def bootstrap_ci(x, y, block_size, rng):
     }
 
 
-# Load and validate raw input files.
-lec = read_time_csv(r"era5_100d_fixed\paper_lec.csv")
-rad = read_time_csv("radiation_100d.csv")
-precip = read_time_csv("precipitation_100d.csv")
+# Load both resolutions through the shared strict alignment path.
+from era5_analysis import load_interval_analysis
 
-for name, frame in (
-    ("LEC", lec),
-    ("Radiation", rad),
-    ("Precipitation", precip),
-):
-    validate_regular_time_index(
-        frame.index, "6h", label=name
-    )
+LEC_FILE = r"era5_100d_fixed\paper_lec.csv"
+RADIATION_FILE = "radiation_100d.csv"
+PRECIPITATION_FILE = "precipitation_100d.csv"
 
-energy_columns = ["Az", "Ae", "Kz", "Ke"]
-missing_energy = set(energy_columns).difference(lec.columns)
-if missing_energy:
-    raise ValueError(
-        f"LEC data is missing columns: {sorted(missing_energy)}"
-    )
+sixh = load_interval_analysis(
+    LEC_FILE, RADIATION_FILE, PRECIPITATION_FILE,
+    frequency="6h", min_abs_rn=0.5,
+)[["gamma", "Z"]]
 
-if "Rn" in rad.columns:
-    rn_col = "Rn"
-elif "R_n" in rad.columns:
-    rn_col = "R_n"
-else:
-    raise ValueError(
-        "Radiation data must contain 'Rn' or 'R_n'."
-    )
+daily = load_interval_analysis(
+    LEC_FILE, RADIATION_FILE, PRECIPITATION_FILE,
+    frequency="D", min_abs_rn=0.5,
+)[["gamma", "Z"]]
 
-if "Z" not in precip.columns:
-    raise ValueError("Precipitation data is missing column 'Z'.")
-
-# Reconstruct interval energy tendency and align inputs.
-lec["E_L"] = lec[energy_columns].sum(
-    axis=1, min_count=len(energy_columns)
-)
-dt_seconds = lec.index.to_series().diff().dt.total_seconds()
-lec["dELdt_interval"] = lec["E_L"].diff() / dt_seconds
-
-sixh_raw = (
-    lec[["dELdt_interval"]]
-    .join(rad[[rn_col]], how="inner")
-    .join(precip[["Z"]], how="inner")
-    .rename(columns={rn_col: "Rn"})
-    .replace([np.inf, -np.inf], np.nan)
-    .dropna()
-)
-
-validate_regular_time_index(
-    sixh_raw.index, "6h", label="Aligned raw analysis"
-)
-
-# Use the same interval-ending derivative for both 6-hourly and daily cases.
-# The previous analysis_timeseries.csv was generated from a centered gradient
-# and is intentionally not used here.
-sixh = sixh_raw.copy()
-sixh["gamma"] = np.nan
-stable_rn = sixh["Rn"].abs() >= 0.5
-sixh.loc[stable_rn, "gamma"] = (
-    sixh.loc[stable_rn, "dELdt_interval"]
-    / sixh.loc[stable_rn, "Rn"]
-)
-sixh = sixh[["gamma", "Z"]]
-
-# Aggregate complete, aligned daily windows.
-daily_means = complete_daily_windows(sixh_raw)
-daily_means = daily_means.replace(
-    [np.inf, -np.inf], np.nan
-)
-daily_means["gamma"] = np.nan
-stable_daily_rn = daily_means["Rn"].abs() >= 0.5
-daily_means.loc[stable_daily_rn, "gamma"] = (
-    daily_means.loc[stable_daily_rn, "dELdt_interval"]
-    / daily_means.loc[stable_daily_rn, "Rn"]
-)
-
-# Keep all complete daily timestamps; invalid denominators remain masked.
-daily = daily_means[["gamma", "Z"]]
 
 cases = {
     "6-hourly": sixh,

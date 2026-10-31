@@ -234,5 +234,22 @@ class TemporalAlignmentTests(unittest.TestCase):
         np.testing.assert_allclose(integrals, np.ones_like(integrals), atol=0.02)
 
 
+    def test_daily_resampling_rejects_an_interior_missing_day(self):
+        times = pd.date_range("2020-01-01 06:00", "2020-01-04 00:00", freq="6h")
+        times = times.delete(5)
+        frame = pd.DataFrame({"x": np.arange(len(times), dtype=float)}, index=times)
+        with self.assertRaisesRegex(ValueError, "not contiguous"):
+            _resample_if_requested(frame, "D")
+
+    def test_shared_daily_windows_reject_an_interior_missing_day(self):
+        from temporal_validation import complete_daily_windows
+
+        times = pd.date_range("2020-01-01 06:00", "2020-01-04 00:00", freq="6h")
+        times = times.delete(5)
+        frame = pd.DataFrame({"x": np.arange(len(times), dtype=float)}, index=times)
+        with self.assertRaisesRegex(ValueError, "not contiguous"):
+            complete_daily_windows(frame)
+
+
 if __name__ == "__main__":
     unittest.main()
