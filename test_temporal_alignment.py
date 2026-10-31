@@ -349,5 +349,35 @@ class TemporalAlignmentTests(unittest.TestCase):
             build_analysis(energy_gamma, precipitation)
 
 
+    def test_exceedance_probabilities_map_to_each_observation_without_extrapolation(self):
+        from LEC_reproduction import map_exceedance_to_observations
+
+        times = pd.date_range("2020-01-01", periods=3, freq="D")
+        frame = pd.DataFrame(
+            {"gamma": [0.5, 1.5, np.nan], "Z": [1.0, 2.0, 3.0]},
+            index=times,
+        )
+        z_grid = np.array([0.0, 5.0])
+        gamma_grid = np.array([0.0, 1.0, 2.0])
+        exceedance = np.array(
+            [[1.0, 0.8, 0.6], [0.0, 0.2, 0.4]]
+        )
+        result = map_exceedance_to_observations(
+            frame, z_grid, gamma_grid, exceedance
+        )
+        self.assertEqual(len(result), 6)
+        self.assertAlmostEqual(
+            result.loc[
+                (result["time"] == times[0])
+                & (result["Z_threshold_mm_day"] == 0.0),
+                "P_exceedance_given_gamma",
+            ].iloc[0],
+            0.9,
+        )
+        self.assertTrue(
+            result.loc[result["time"] == times[2], "P_exceedance_given_gamma"].isna().all()
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
