@@ -70,9 +70,17 @@ The built-in default namelist expects:
 
 A custom namelist can be supplied if the NetCDF uses different variable names.
 
+## Documentation
+
+- [Scientific method and physical assumptions](SCIENTIFIC_METHOD.md)
+- [Reproducibility and delivery guide](REPRODUCIBILITY.md)
+- [ERA5 temporal-contract validation](ERA5_TEMPORAL_VALIDATION.md)
+- [Reproducibility audit and historical results](REPRODUCIBILITY_AUDIT.md)
+- [Contributing and quality checks](CONTRIBUTING.md)
+
 ## One-command local pipeline
 
-After the repository is updated and the Python environment is active, run:
+After installing dependencies, placing the original ERA5 NetCDF files in the repository root, and configuring CDS API credentials, run:
 
     python run_era5_pipeline.py
 
@@ -99,7 +107,16 @@ extended files are present, and otherwise use the original pilot files.
 
 ### 1. Install
 
-Use Python 3.13.3 (the tested environment) and install `requirements.txt`.
+Use Python 3.13 and install the pinned dependencies:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Configure CDS API credentials before running the endpoint-extension step. Never commit credentials or raw ERA5 NetCDF files. See [REPRODUCIBILITY.md](REPRODUCIBILITY.md) for the complete procedure.
 
 ### 2. Run LorenzCycleToolkit and the paper analysis in one command
 
@@ -194,11 +211,13 @@ The KDE treats precipitation as a continuous non-negative variable; it does not 
 The figures below are retained as historical pilot outputs. They are not the final results of the updated pipeline. Recompute them with `python run_era5_pipeline.py` before citing them.
 
 
-A 100-day regional ERA5 experiment was performed over:
+A 100-day regional ERA5 pilot experiment used the domain:
 
 - latitude: `17.5 S to 42.5 S`
 - longitude: `60 W to 30 W`
-- period: `2020-01-01` to `2020-04-09`
+- target interval: `(2020-01-01 00:00, 2020-04-10 00:00] UTC`
+
+The original local files end before the final endpoint and support only 99 complete daily windows. The extended 100-day pipeline adds the single missing pressure-level and surface endpoint; the historical numbers below were produced before that extension and are retained only for traceability.
 
 Using the corrected physical workflow:
 
