@@ -15,6 +15,13 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from era5_metadata import (
+    PRESSURE_UNITS,
+    SURFACE_UNITS,
+    validate_grib_step_types,
+    validate_variable_units,
+)
+
 
 ROOT = Path(__file__).resolve().parent
 START = pd.Timestamp("2020-01-01 00:00:00")
@@ -117,6 +124,36 @@ def validate_extended_inputs() -> None:
         required_variables={"tsr", "ttr", "tp"},
     ):
         raise ValueError("Extended surface NetCDF failed validation.")
+
+    with xr.open_dataset(PRESSURE_EXTENDED) as ds:
+        validate_variable_units(
+            {name: ds[name].attrs.get("units", "") for name in PRESSURE_UNITS},
+            PRESSURE_UNITS,
+            dataset_label="ERA5 pressure-level dataset",
+        )
+        validate_grib_step_types(
+            {
+                name: ds[name].attrs.get("GRIB_stepType")
+                for name in PRESSURE_UNITS
+            },
+            expected="instant",
+            dataset_label="ERA5 pressure-level dataset",
+        )
+
+    with xr.open_dataset(SURFACE_EXTENDED) as ds:
+        validate_variable_units(
+            {name: ds[name].attrs.get("units", "") for name in SURFACE_UNITS},
+            SURFACE_UNITS,
+            dataset_label="ERA5 surface dataset",
+        )
+        validate_grib_step_types(
+            {
+                name: ds[name].attrs.get("GRIB_stepType")
+                for name in SURFACE_UNITS
+            },
+            expected="accum",
+            dataset_label="ERA5 surface dataset",
+        )
 
 
 def validate_lec_results(path: Path) -> None:
