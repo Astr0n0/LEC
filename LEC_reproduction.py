@@ -365,8 +365,18 @@ def load_precipitation_csv(path: Path) -> pd.DataFrame:
     return z.to_frame()
 
 
-def _resample_if_requested(df: pd.DataFrame, frequency: Optional[str]) -> pd.DataFrame:
-    """Resample interval-ending data into complete right-labelled bins."""
+def _resample_if_requested(
+    df: pd.DataFrame,
+    frequency: Optional[str],
+    required_columns: Optional[list[str]] = None,
+) -> pd.DataFrame:
+    """Resample interval-ending data into complete right-labelled bins.
+
+    Only required_columns determine whether a bin is complete. Optional
+    diagnostics are averaged from available values without invalidating the
+    primary LEC/radiation analysis.
+    """
+
     if not frequency:
         return df
 
@@ -393,7 +403,11 @@ def _resample_if_requested(df: pd.DataFrame, frequency: Optional[str]) -> pd.Dat
     )
     counts = resampler.count()
     means = resampler.mean()
-    complete = counts.eq(expected).all(axis=1)
+    required = list(df.columns) if required_columns is None else list(required_columns)
+    missing_required = set(required).difference(df.columns)
+    if missing_required:
+        raise ValueError(f"Required resampling columns are missing: {sorted(missing_required)}")
+    complete = counts[required].eq(expected).all(axis=1)
     result = means.loc[complete].copy()
     if len(result) > 1:
         result_intervals = result.index.to_series().diff().dropna()
@@ -415,7 +429,9 @@ def align_energy_and_radiation(
     if not np.isfinite(min_abs_rn) or min_abs_rn < 0:
         raise ValueError("min_abs_rn must be finite and non-negative.")
 
-    lec2 = _resample_if_requested(lec, frequency)
+    lec2 = _resample_if_requested(
+        lec, frequency, required_columns=["dE_L_dt"]
+    )
     rad2 = _resample_if_requested(radiation, frequency)
 
     # The first LEC state has no preceding interval. Every subsequent tendency
