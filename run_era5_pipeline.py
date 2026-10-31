@@ -146,6 +146,23 @@ def validate_lec_results(path: Path) -> None:
 def validate_analysis_output(path: Path, *, daily: bool) -> int:
     if not path.is_file():
         raise FileNotFoundError(f"Analysis output not found: {path}")
+    required_outputs = [
+        "analysis_timeseries.csv",
+        "summary.csv",
+        "conditional_pdf.csv",
+        "psi.csv",
+        "conditional_cdf.csv",
+        "precipitation_exceedance_probability.csv",
+        "analysis_metadata.json",
+    ]
+    missing_outputs = [
+        name for name in required_outputs
+        if not (path.parent / name).is_file()
+    ]
+    if missing_outputs:
+        raise FileNotFoundError(
+            f"{path.parent} is missing required analysis outputs: {missing_outputs}"
+        )
     df = pd.read_csv(path)
     times = pd.DatetimeIndex(pd.to_datetime(df["time"], errors="raise"))
     if daily:
