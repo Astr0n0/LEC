@@ -175,6 +175,7 @@ Provide a time column and one of `Z`, `precipitation`, `precip`, `tp`, or `preci
 - `03_conditional_pdf.png`
 - `04_pdf_ratio_psi.png`
 - `05_conditional_expectation.png`
+- `06_precipitation_exceedance_probability.png`
 - Toolkit stdout/stderr logs when Toolkit is run by the script
 
 
