@@ -1,0 +1,38 @@
+name: Python tests
+
+on:
+  push:
+    branches:
+      - main
+      - "fix/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  temporal-alignment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy pandas scipy matplotlib
+
+      - name: Compile project entry points
+        run: >-
+          python -m compileall -q analysis_config.py era5_metadata.py LEC_reproduction.py era5_analysis.py
+          era5_surface_processing.py prepare_era5_surface.py
+          extend_era5_100d.py run_era5_pipeline.py block_bootstrap_correlation.py
+          block_bootstrap_sensitivity.py circular_shift_test.py
+
+      - name: Run project tests
+        run: python -m unittest discover -v

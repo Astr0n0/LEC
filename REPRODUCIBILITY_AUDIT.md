@@ -886,6 +886,17 @@ Therefore, this 100-day regional ERA5 experiment should be interpreted as an exp
 
 ## 20. Autocorrelation-aware uncertainty analysis
 
+> **Temporal-alignment update (2026-10-30):** The 6-hourly bootstrap figures
+> below were produced from the earlier `analysis_timeseries.csv`, whose
+> `gamma` used a centered `np.gradient(E_L)`. ERA5 accumulated surface fields
+> at timestamp `t` represent the interval ending at `t`; the production
+> workflow now uses `[E_L(t)-E_L(t-6h)]/6h` for that timestamp. Consequently,
+> the old 6-hourly bootstrap estimates and any 6-hourly correlations based on
+> the centered derivative are historical diagnostics, not final interval-aligned
+> estimates. Re-run the updated analysis and bootstrap scripts before citing
+> 6-hourly values. The aligned-daily calculations in this section already
+> reconstruct the interval tendency explicitly.
+
 Because precipitation and gamma are time series, ordinary independent-sample confidence intervals can underestimate uncertainty when serial dependence is present.
 
 ### Autocorrelation diagnostics
@@ -991,3 +1002,171 @@ At daily resolution, a weak positive rank association can appear under some shor
 Therefore, the current 100-day regional ERA5 experiment does not provide robust statistical support for a strong gamma-precipitation relationship comparable to the paper's reported:
 
 `r = 0.865`
+
+
+---
+
+## 21. ERA5 hourly accumulation contract — verified 2026-10-31
+
+### Dataset identity and official convention
+
+The current surface download script requests the Copernicus dataset
+**reanalysis-era5-single-levels** with **product_type = reanalysis**.
+It does not request ERA5-Land.
+
+The requested surface variables are:
+
+- **tp**: total precipitation, metres of water equivalent
+- **tsr**: top net solar radiation, J m⁻²
+- **ttr**: top net thermal radiation, J m⁻²
+
+ECMWF's documentation defines the hourly ERA5 reanalysis accumulation at
+validity time t as the total accumulated over the preceding one-hour
+processing interval ending at t. Thus records at 01, 02, ..., 06 UTC are
+six distinct one-hour accumulations for (00, 06].
+
+**Conclusion: sum the six hourly records. Do not difference consecutive
+hourly records.** Differencing is associated with other accumulation
+conventions, notably ERA5-Land hourly forecast-step accumulations; it is
+not the correct operation for this ERA5 hourly reanalysis request.
+
+Official references:
+
+- https://confluence.ecmwf.int/pages/viewpage.action?pageId=212460134
+- https://codes.ecmwf.int/grib/param-db/178
+- https://codes.ecmwf.int/grib/param-db/?id=179
+- https://confluence.ecmwf.int/pages/viewpage.action?pageId=669811810
+
+ECMWF uses the downward-positive convention for vertical radiative fluxes.
+tsr is incoming shortwave minus reflected shortwave radiation at TOA.
+ttr is the negative of outgoing longwave radiation (OLR). Therefore
+tsr + ttr is net incoming radiation at TOA and is consistent with the
+paper's Q(1-alpha)-F expression.
+
+The absence of GRIB_startStep, GRIB_endStep and GRIB_stepRange from the
+current NetCDF files is not sufficient reason to redownload the full data:
+the dataset identity, request configuration, variable definitions and
+ECMWF documentation jointly establish the accumulation convention.
+
+### Valid transformations
+
+For each complete six-hour interval ending at t:
+
+    R_n(t) = [sum(tsr) + sum(ttr)] / 21600  W m-2
+    Z(t)   = sum(tp) * 1000 * 4             mm day-1
+
+The existing method of area-averaging hourly fields with cosine-latitude
+weights and then summing the interval accumulations is consistent with the
+linear area and time aggregation.
+
+### Actual coverage and required endpoint
+
+The local audit recorded:
+
+- Pressure levels: 400 states, 2020-01-01 00 through 2020-04-09 18 UTC.
+- Surface: 2400 hourly records, 2020-01-01 00 through 2020-04-09 23 UTC.
+- Processed surface series: 399 complete six-hour intervals, 2020-01-01 06 through 2020-04-09 18 UTC.
+
+Under the required interval-ending convention, complete daily windows are
+right-closed (previous midnight, current midnight] windows containing
+four six-hour intervals. The current data therefore support **99 complete
+daily windows**, labelled 2020-01-02 00 through 2020-04-09 00 UTC. The
+previously saved 100-row daily CSV must not be described as 100 complete
+days without a complete-window count.
+
+To obtain 100 complete daily windows, only the final endpoint is missing:
+
+- One pressure-level state at 2020-04-10 00 UTC.
+- One hourly surface accumulation at 2020-04-10 00 UTC.
+
+The surface records from 2020-04-09 19 through 23 UTC already exist. No
+full-period download is required.
+
+### Code changes and validation status
+
+The repository now includes:
+
+- ERA5_TEMPORAL_VALIDATION.md: full convention, unit and coverage record.
+- era5_surface_processing.py: tested aggregation of hourly accumulations.
+- era5_metadata.py: validates ERA5 pressure/surface units and GRIB step types when present.
+- prepare_era5_surface.py: area-weighted processing with explicit inputs
+  and outputs.
+- extend_era5_100d.py: requests only the two missing endpoint records and
+  writes new extended NetCDF files without modifying the originals.
+- analysis_config.py: selects the extended data set automatically once
+  all extended inputs exist.
+- Strict timestamp matching and non-finite-value validation in the shared
+  and main analysis loaders.
+- Time-axis preservation for small-denominator gamma masks.
+- Rejection of discontinuous daily windows before time-series inference.
+
+The automated tests cover interval-ending tendencies, exact timestamp
+alignment, complete daily windows, missing-data gaps, hourly accumulation
+summation, unit conversions, GRIB step metadata, positive-support KDE
+normalization, conditional CDF/exceedance calculations, and mapping
+probabilities to each observation without extrapolation.
+
+**Verified:** ERA5 accumulation convention and mathematical transformations.
+
+**Verified in CI:** software tests and syntax compilation for the pipeline
+entry points (see the latest GitHub Actions run on this branch).
+
+**Pending local validation:** execute the endpoint extension and rerun the
+actual NetCDF-to-LEC pipeline. Until that run is complete, the old pilot
+correlations and bootstrap estimates remain historical results and must
+not be presented as the final interval-aligned 100-day analysis.
+
+
+
+---
+
+## 22. Conditional precipitation probability outputs
+
+The paper defines the conditional density P(Z,t | gamma,t) and, in Eq. 40,
+defines the PDF ratio:
+
+    Psi(Z, gamma; t) = P(Z, t | gamma, t) / P(gamma, t)
+
+These two objects must not be conflated. The conditional density is a
+probability density over precipitation amounts; integrating it over an
+interval [z1, z2] gives the probability that precipitation lies in that
+interval, conditional on gamma. The Eq. 40 quantity Psi is a ratio of
+densities. Although the paper describes it as representing a probability,
+it is not itself a normalized event probability.
+
+The analysis now saves both the paper's PDF ratio and proper conditional
+event-probability outputs:
+
+- conditional_pdf.csv: p(Z | gamma)
+- conditional_cdf.csv: P(Z <= z | gamma)
+- precipitation_exceedance_probability.csv: P(Z > z_threshold | gamma)
+  for every precipitation threshold on the saved Z grid
+- precipitation_exceedance_timeseries.csv: interpolated conditional
+  exceedance probabilities for each observed timestamp and each threshold;
+  no extrapolation is performed outside the fitted gamma grid
+- psi.csv: the Eq. 40 density ratio
+
+No wet-day or heavy-precipitation threshold is hard-coded because the paper
+does not specify one. A researcher can select a physically meaningful
+threshold and read the corresponding exceedance probability from the
+saved matrix. This also avoids reporting the PDF ratio as though it were
+the probability of a precipitation event.
+
+The CDF and exceedance outputs are numerically integrated from the
+non-negative-support conditional KDE and normalized over the displayed
+precipitation grid. They are in-sample descriptive probabilities; they do
+not constitute out-of-sample forecast skill. Any claim of predictive skill
+requires blocked out-of-sample validation and probability calibration.
+
+
+
+A further limitation is the treatment of zero precipitation. The current
+Gaussian KDE models Z as a continuous non-negative variable; it does not
+represent a discrete probability mass at exactly zero. Consequently,
+P(Z > z_threshold | gamma) is meaningful for positive thresholds on the
+saved grid, but the limit at zero should not be interpreted as a calibrated
+rain/no-rain occurrence probability. A wet-day occurrence model requires
+the research team to define a wet-day threshold and then fit/evaluate a
+binary or hurdle model. The paper does not specify such a threshold, so
+none is hard-coded here.
+

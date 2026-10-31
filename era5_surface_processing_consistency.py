@@ -1,8 +1,13 @@
-﻿import numpy as np
+import numpy as np
 import pandas as pd
 import xarray as xr
 
 ds = xr.open_dataset("era5_surface_100d.nc")
+
+required = {"tsr", "ttr", "tp"}
+missing = required.difference(ds.data_vars)
+if missing:
+    raise ValueError(f"Missing variables: {sorted(missing)}")
 
 lat_weights = np.cos(np.deg2rad(ds["latitude"]))
 
@@ -14,23 +19,32 @@ raw = regional.to_dataframe()[["tsr", "ttr", "tp"]]
 raw.index = pd.DatetimeIndex(raw.index)
 raw = raw.sort_index()
 
-counts = raw["tsr"].resample(
-    "6h", closed="right", label="right"
+if raw.index.has_duplicates:
+    duplicates = raw.index[raw.index.duplicated()].unique()
+    raise ValueError(
+        "Duplicate hourly timestamps found: "
+        f"{list(duplicates[:5])}"
+    )
+
+# Treat both missing and non-finite values as invalid observations.
+raw = raw.replace([np.inf, -np.inf], np.nan)
+
+resample_args = {
+    "rule": "6h",
+    "closed": "right",
+    "label": "right",
+}
+
+counts = raw[["tsr", "ttr", "tp"]].resample(
+    **resample_args
 ).count()
 
-tsr = raw["tsr"].resample(
-    "6h", closed="right", label="right"
-).sum()
+tsr = raw["tsr"].resample(**resample_args).sum()
+ttr = raw["ttr"].resample(**resample_args).sum()
+tp = raw["tp"].resample(**resample_args).sum()
 
-ttr = raw["ttr"].resample(
-    "6h", closed="right", label="right"
-).sum()
-
-tp = raw["tp"].resample(
-    "6h", closed="right", label="right"
-).sum()
-
-complete = counts == 6
+# Match the production script: all three variables need six valid hours.
+complete = counts.eq(6).all(axis=1)
 
 expected_rn = ((tsr + ttr) / (6 * 3600)).loc[complete]
 expected_z = (tp * 1000 * 4).loc[complete]

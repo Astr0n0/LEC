@@ -1,8 +1,10 @@
 ﻿import pandas as pd
 import numpy as np
 
+from analysis_config import get_analysis_inputs, get_analysis_timeseries_path
+
 lec = pd.read_csv(
-    r"era5_100d_fixed\paper_lec.csv",
+    get_analysis_inputs()[0],
     parse_dates=[0],
 )
 
@@ -10,7 +12,7 @@ time_col = lec.columns[0]
 lec = lec.rename(columns={time_col: "time"}).set_index("time")
 
 analysis = pd.read_csv(
-    r"LEC_100d_real\analysis_timeseries.csv",
+    get_analysis_timeseries_path(),
     parse_dates=["time"],
 ).set_index("time")
 

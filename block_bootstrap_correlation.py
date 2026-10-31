@@ -25,9 +25,14 @@ def safe_correlations(gamma, z):
     if len(gamma) < 3 or len(z) != len(gamma):
         return None
 
-    if not np.isfinite(gamma).all() or not np.isfinite(z).all():
-        return None
+    # Keep masked timestamps in the block sequence; filter pairs only when
+    # calculating the replicate statistic so temporal gaps are not compressed.
+    valid = np.isfinite(gamma) & np.isfinite(z)
+    gamma = gamma[valid]
+    z = z[valid]
 
+    if len(gamma) < 3:
+        return None
     if np.ptp(gamma) == 0 or np.ptp(z) == 0:
         return None
 
@@ -104,104 +109,22 @@ def bootstrap_correlations(gamma, z, block_size, rng):
     )
 
 
-# 1. Load and validate the original 6-hourly analysis series.
-sixh_df = read_time_csv(
-    r"LEC_100d_real\analysis_timeseries.csv"
-)
-validate_regular_time_index(
-    sixh_df.index,
-    "6h",
-    label="6-hourly analysis",
-)
+# Load both resolutions through the shared strict alignment path.
+from era5_analysis import load_interval_analysis
 
-required = {"gamma", "Z"}
-missing = required.difference(sixh_df.columns)
-if missing:
-    raise ValueError(
-        f"6-hourly analysis is missing columns: {sorted(missing)}"
-    )
+from analysis_config import get_analysis_inputs
 
-sixh = sixh_df[["gamma", "Z"]].replace(
-    [np.inf, -np.inf], np.nan
-).dropna()
+LEC_FILE, RADIATION_FILE, PRECIPITATION_FILE = map(str, get_analysis_inputs())
 
-if len(sixh) < 3:
-    raise ValueError("Not enough valid 6-hourly observations.")
+sixh = load_interval_analysis(
+    LEC_FILE, RADIATION_FILE, PRECIPITATION_FILE,
+    frequency="6h", min_abs_rn=0.5,
+)[["gamma", "Z"]]
 
-# 2. Load and validate raw input timestamps.
-lec = read_time_csv(r"era5_100d_fixed\paper_lec.csv")
-rad = read_time_csv("radiation_100d.csv")
-precip = read_time_csv("precipitation_100d.csv")
-
-for name, frame in (
-    ("LEC", lec),
-    ("Radiation", rad),
-    ("Precipitation", precip),
-):
-    validate_regular_time_index(
-        frame.index,
-        "6h",
-        label=name,
-    )
-
-energy_columns = ["Az", "Ae", "Kz", "Ke"]
-missing_energy = set(energy_columns).difference(lec.columns)
-if missing_energy:
-    raise ValueError(
-        f"LEC data is missing columns: {sorted(missing_energy)}"
-    )
-
-if "Rn" in rad.columns:
-    rn_col = "Rn"
-elif "R_n" in rad.columns:
-    rn_col = "R_n"
-else:
-    raise ValueError(
-        "Radiation data must contain either 'Rn' or 'R_n'."
-    )
-
-if "Z" not in precip.columns:
-    raise ValueError("Precipitation data is missing column 'Z'.")
-
-# 3. Reconstruct the interval derivative and align all variables.
-lec["E_L"] = lec[energy_columns].sum(
-    axis=1,
-    min_count=len(energy_columns),
-)
-dt_seconds = lec.index.to_series().diff().dt.total_seconds()
-lec["dELdt_interval"] = lec["E_L"].diff() / dt_seconds
-
-sixh_raw = (
-    lec[["dELdt_interval"]]
-    .join(rad[[rn_col]], how="inner")
-    .join(precip[["Z"]], how="inner")
-    .rename(columns={rn_col: "Rn"})
-    .replace([np.inf, -np.inf], np.nan)
-    .dropna()
-)
-
-validate_regular_time_index(
-    sixh_raw.index,
-    "6h",
-    label="Aligned raw analysis",
-)
-
-# 4. Build complete, correctly aligned daily windows.
-daily_means = complete_daily_windows(sixh_raw)
-daily_means = daily_means.replace(
-    [np.inf, -np.inf], np.nan
-)
-
-if (daily_means["Rn"] == 0).any():
-    daily_means = daily_means.loc[daily_means["Rn"] != 0]
-
-daily_means["gamma"] = (
-    daily_means["dELdt_interval"] / daily_means["Rn"]
-)
-
-daily = daily_means[["gamma", "Z"]].replace(
-    [np.inf, -np.inf], np.nan
-).dropna()
+daily = load_interval_analysis(
+    LEC_FILE, RADIATION_FILE, PRECIPITATION_FILE,
+    frequency="D", min_abs_rn=0.5,
+)[["gamma", "Z"]]
 
 if len(daily) < 3:
     raise ValueError("Not enough complete daily observations.")

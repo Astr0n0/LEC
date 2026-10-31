@@ -1,8 +1,10 @@
 ﻿import pandas as pd
 import numpy as np
 
+from analysis_config import get_analysis_inputs
+
 lec = pd.read_csv(
-    r"era5_100d_fixed\paper_lec.csv",
+    get_analysis_inputs()[0],
     parse_dates=[0],
 )
 

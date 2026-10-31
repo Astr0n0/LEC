@@ -2,6 +2,28 @@
 
 This folder replaces the placeholder LEC calculation in the supplied `LEC.py` with diagnostics produced by **daniloceano/LorenzCycleToolkit**.
 
+## ERA5 accumulation convention and complete 100-day coverage
+
+The current single-level request is for hourly ERA5 **reanalysis**. ECMWF
+specifies that hourly **tp**, **tsr** and **ttr** values are one-hour
+accumulations ending at each validity timestamp. They are summed over six
+hours; consecutive values are not differenced. The official verification,
+units, sign convention and time-coverage audit are documented in
+[ERA5_TEMPORAL_VALIDATION.md](ERA5_TEMPORAL_VALIDATION.md).
+
+The original files provide 399 complete six-hour surface intervals and
+therefore 99 complete right-closed daily windows. To obtain exactly 100
+complete days, run the following from the project root to fetch only the
+missing 2020-04-10 00:00 UTC pressure-level and surface endpoints:
+
+    python extend_era5_100d.py
+
+The script writes separate extended NetCDF files and never modifies the
+originals. Then run:
+
+    python prepare_era5_surface.py --input-file era5_surface_100d_extended.nc --radiation-output radiation_100d_extended.csv --precipitation-output precipitation_100d_extended.csv
+
+
 ## What changed
 
 The old code estimated `KZ`, `KE`, `PZ`, and `PE` with simple grid variances and temperature squares. Those quantities are not a complete Lorenz Energy Cycle diagnostic. The rewritten workflow uses LorenzCycleToolkit reservoirs:
@@ -17,7 +39,11 @@ LorenzCycleToolkit stores these reservoirs in **J m⁻²**. We therefore calcula
 
 and use the actual timestamps to obtain
 
-`dE_L/dt` in **W m⁻²**.
+`dE_L/dt` in **W m⁻²**. Because ERA5 accumulated radiation and precipitation
+at timestamp `t` describe the interval ending at `t`, the primary tendency is
+the matching interval difference
+`[E_L(t) - E_L(t-6h)] / 6h`. The centered derivative is retained only as a
+diagnostic and is not used in `gamma`.
 
 The paper's first definition of the energy ratio is then implemented directly:
 
@@ -44,11 +70,53 @@ The built-in default namelist expects:
 
 A custom namelist can be supplied if the NetCDF uses different variable names.
 
+## Documentation
+
+- [Scientific method and physical assumptions](SCIENTIFIC_METHOD.md)
+- [Reproducibility and delivery guide](REPRODUCIBILITY.md)
+- [ERA5 temporal-contract validation](ERA5_TEMPORAL_VALIDATION.md)
+- [Reproducibility audit and historical results](REPRODUCIBILITY_AUDIT.md)
+- [Contributing and quality checks](CONTRIBUTING.md)
+
+## One-command local pipeline
+
+After installing dependencies, placing the original ERA5 NetCDF files in the repository root, and configuring CDS API credentials, run:
+
+    python run_era5_pipeline.py
+
+The pipeline:
+
+1. Runs the automated unit tests.
+2. Validates or downloads only the missing 2020-04-10 00 UTC ERA5 endpoints.
+3. Validates the extended NetCDF time axes.
+4. Reprocesses the surface variables into 400 complete six-hour intervals.
+5. Runs LorenzCycleToolkit if the extended 401-state result does not already exist.
+6. Produces both six-hourly and 100-day complete daily analyses.
+7. Runs bootstrap, circular-shift, autocorrelation, threshold and regional-boundary diagnostics.
+8. Saves a manifest and individual logs.
+
+Original ERA5 NetCDF files are not modified. Extended NetCDF files, processed CSVs,
+analysis outputs and logs are written as separate files/folders. If an optional
+diagnostic fails, the pipeline records its log and continues with the remaining
+diagnostics; the core data and LEC steps remain fail-fast.
+
+The analysis scripts automatically prefer the extended input set when all three
+extended files are present, and otherwise use the original pilot files.
+
 ## Recommended workflow
 
 ### 1. Install
 
-Use Python 3.13.3 (the tested environment) and install `requirements.txt`.
+Use Python 3.13 and install the pinned dependencies:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Configure CDS API credentials before running the endpoint-extension step. Never commit credentials or raw ERA5 NetCDF files. See [REPRODUCIBILITY.md](REPRODUCIBILITY.md) for the complete procedure.
 
 ### 2. Run LorenzCycleToolkit and the paper analysis in one command
 
@@ -101,6 +169,11 @@ or provide `Q`, `alpha`, and `F`; the code uses `Rn = Q(1-alpha)-F`.
 
 Radiation must correspond to the same spatial domain and time basis as the LEC calculation.
 
+When `--resample D` is used, the workflow forms right-labelled complete daily
+windows `(00:00, next 00:00]`, containing the four six-hour intervals ending
+at 06, 12, 18 and 00 UTC. Incomplete bins are discarded; partial days are not
+silently averaged.
+
 ## Precipitation CSV
 
 Provide a time column and one of `Z`, `precipitation`, `precip`, `tp`, or `precip_mm_day`. Values are expected in mm/day for the paper plots.
@@ -109,24 +182,50 @@ Provide a time column and one of `Z`, `precipitation`, `precip`, `tp`, or `preci
 
 - `analysis_timeseries.csv`
 - `summary.csv`
+- `conditional_pdf.csv`
+- `psi.csv`
+- `conditional_cdf.csv`
+- `precipitation_exceedance_probability.csv`
+- `precipitation_exceedance_timeseries.csv` (threshold exceedance probabilities mapped to each observation; no extrapolation outside the KDE gamma grid)
+- `precipitation_exceedance_timeseries.csv`
+- `analysis_metadata.json`
 - `01_time_series.png`
 - `02_scatter.png`
 - `03_conditional_pdf.png`
 - `04_pdf_ratio_psi.png`
 - `05_conditional_expectation.png`
+- `06_precipitation_exceedance_probability.png`
 - Toolkit stdout/stderr logs when Toolkit is run by the script
 
-## ERA5 100-day pilot result
 
-A 100-day regional ERA5 experiment was performed over:
+The probabilistic outputs are distinct:
+
+- **conditional_pdf.csv** contains the conditional density p(Z | gamma).
+- **conditional_cdf.csv** contains P(Z <= z | gamma).
+- **precipitation_exceedance_probability.csv** contains P(Z > z_threshold | gamma) for every threshold on the saved Z grid. This avoids inventing a wet-day threshold not specified in the paper.
+- **precipitation_exceedance_timeseries.csv** interpolates those probabilities to each observed timestamp and lists the observed gamma, observed Z, threshold, and conditional exceedance probability. Values are NaN when gamma is masked or outside the fitted KDE grid.
+- **psi.csv** implements the PDF ratio in the paper's Eq. 40. It is a ratio of densities, not itself an event probability.
+
+The KDE treats precipitation as a continuous non-negative variable; it does not estimate a point mass at exactly zero. A rain/no-rain occurrence probability therefore requires a separately agreed wet-day threshold and a binary or hurdle model. The paper does not specify that threshold, so the pipeline does not invent one. The saved exceedance matrix supports evaluation once the research team selects the event definition.
+
+
+## ERA5 100-day pilot result — historical values pending rerun
+
+The figures below are retained as historical pilot outputs. They are not the final results of the updated pipeline. Recompute them with `python run_era5_pipeline.py` before citing them.
+
+
+A 100-day regional ERA5 pilot experiment used the domain:
 
 - latitude: `17.5 S to 42.5 S`
 - longitude: `60 W to 30 W`
-- period: `2020-01-01` to `2020-04-09`
+- target interval: `(2020-01-01 00:00, 2020-04-10 00:00] UTC`
+
+The original local files end before the final endpoint and support only 99 complete daily windows. The extended 100-day pipeline adds the single missing pressure-level and surface endpoint; the historical numbers below were produced before that extension and are retained only for traceability.
 
 Using the corrected physical workflow:
 
-- 6-hourly Pearson `r(gamma, Z) = 0.022692`
+- 6-hourly Pearson `r(gamma, Z) = 0.022692` (legacy result from the centered
+  derivative; superseded pending recomputation with the interval-aligned tendency)
 - aligned daily Pearson `r(gamma, Z) = -0.046642` (`n = 99`, complete 24-hour windows)
 - aligned daily Spearman `rho(gamma, Z) = 0.200965`
 
@@ -138,7 +237,9 @@ was not reproduced.
 
 Robustness checks show that:
 
-- the 6-hourly relationship remains near zero under radiation-threshold and rank-correlation tests
+- previously reported 6-hourly threshold, rank-correlation and bootstrap results
+  used the centered derivative and must be recomputed before being treated as
+  final interval-aligned results
 - the aligned daily Pearson relationship is near zero; threshold sensitivity is substantial (`r = 0.250702` at `|Rn| >= 5 W/m^2`, but near zero at higher thresholds)
 - the aligned daily moving-block bootstrap 95% intervals include zero for both Pearson and Spearman across all tested block lengths
 - the circular-shift test after threshold/lag search is not significant (`p = 0.606061`; maximum absolute observed correlation `= 0.386146` at threshold `|Rn| >= 40 W/m^2`, lag `4`, `n = 68`)

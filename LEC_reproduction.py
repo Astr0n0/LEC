@@ -21,6 +21,9 @@ uses the directly diagnosed total energy tendency dE_L/dt.
 from __future__ import annotations
 
 import argparse
+import json
+import platform
+from importlib import metadata
 import shutil
 import subprocess
 import sys
@@ -31,7 +34,10 @@ from typing import Optional
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from scipy.integrate import cumulative_trapezoid
 from scipy.stats import gaussian_kde
+
+from temporal_validation import validate_regular_time_index
 
 
 ERA5_COPERNICUS_NEW_NAMELIST = """;standard_name;Variable;Units
@@ -72,6 +78,8 @@ class AnalysisResult:
     gamma_grid: np.ndarray
     conditional_pdf: np.ndarray
     psi: np.ndarray
+    conditional_cdf: np.ndarray
+    exceedance_probability: np.ndarray
     correlation: float
 
 
@@ -89,6 +97,23 @@ def _write_box_limits(path: Path, domain: Domain) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def _publish_toolkit_result(
+    result_file: Path,
+    atmospheric_nc: Path,
+    outname: str,
+) -> Path:
+    """Copy a Toolkit CSV to the stable project-level result location."""
+    canonical = (
+        atmospheric_nc.expanduser().resolve().parent
+        / f"{atmospheric_nc.stem}_fixed"
+        / f"{outname}.csv"
+    )
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    if result_file.expanduser().resolve() != canonical.resolve():
+        shutil.copy2(result_file, canonical)
+    return canonical
 
 
 def run_lorenz_cycle_toolkit(
@@ -185,8 +210,15 @@ def run_lorenz_cycle_toolkit(
                 f"Found: {unique_matches}"
             )
 
+    # Publish the primary CSV at a stable project-level path. The Toolkit
+    # writes into its working directory (LEC_Results/<input>_fixed), while
+    # downstream pipeline stages and diagnostics consume this canonical path.
+    canonical_result = _publish_toolkit_result(
+        result_file, atmospheric_nc, outname
+    )
     print(f"Toolkit results: {result_file}")
-    return result_file
+    print(f"Canonical LEC CSV: {canonical_result}")
+    return canonical_result
 
 
 def _read_time_indexed_csv(path: Path) -> pd.DataFrame:
@@ -214,11 +246,17 @@ def _read_time_indexed_csv(path: Path) -> pd.DataFrame:
 
 
 def load_lec_results(path: Path) -> pd.DataFrame:
-    """Load LorenzCycleToolkit result CSV and compute E_L and dE_L/dt."""
+    """Load Toolkit reservoirs and compute interval-aligned energy tendency.
+
+    dE_L_dt is the backward finite difference ending at each timestamp and
+    aligns with ERA5 accumulations for the preceding interval. The centered
+    gradient is retained separately for comparison with Toolkit diagnostics.
+    """
     path = path.expanduser().resolve()
     if not path.exists():
         raise FileNotFoundError(f"LEC result CSV not found: {path}")
     df = _read_time_indexed_csv(path)
+    validate_regular_time_index(df.index, "6h", label="LEC results")
 
     missing = [c for c in REQUIRED_LEC_COLUMNS if c not in df.columns]
     if missing:
@@ -231,24 +269,45 @@ def load_lec_results(path: Path) -> pd.DataFrame:
     for c in REQUIRED_LEC_COLUMNS:
         out[c] = pd.to_numeric(out[c], errors="raise")
 
-    out["E_L"] = out[list(REQUIRED_LEC_COLUMNS)].sum(axis=1)
+    # Require all four energy reservoirs; never sum a partial energy budget.
+    out[list(REQUIRED_LEC_COLUMNS)] = out[list(REQUIRED_LEC_COLUMNS)].replace(
+        [np.inf, -np.inf], np.nan
+    )
+    out["E_L"] = out[list(REQUIRED_LEC_COLUMNS)].sum(
+        axis=1, min_count=len(REQUIRED_LEC_COLUMNS)
+    )
+
     seconds = (out.index - out.index[0]).total_seconds().to_numpy(dtype=float)
     if len(seconds) < 2:
         raise ValueError("At least two LEC time steps are required")
-    if np.any(np.diff(seconds) <= 0):
+    intervals = np.diff(seconds)
+    if np.any(~np.isfinite(intervals)) or np.any(intervals <= 0):
         raise ValueError("LEC timestamps must be strictly increasing")
-    out["dE_L_dt"] = np.gradient(out["E_L"].to_numpy(dtype=float), seconds)
+
+    # ERA5 accumulated surface fields at timestamp t describe the interval
+    # ending at t. Pair them with the matching interval-mean energy tendency.
+    out["dE_L_dt"] = out["E_L"].diff() / pd.Series(
+        intervals, index=out.index[1:]
+    )
+
+    # Retain the centered derivative only for diagnostics and Toolkit checks.
+    out["dE_L_dt_centered"] = np.gradient(
+        out["E_L"].to_numpy(dtype=float), seconds
+    )
 
     derivative_cols = [f"∂{term}/∂t (finite diff.)" for term in REQUIRED_LEC_COLUMNS]
     if all(c in out.columns for c in derivative_cols):
         toolkit_tendency = out[derivative_cols].sum(axis=1).to_numpy(dtype=float)
-        diff = np.nanmax(np.abs(toolkit_tendency - out["dE_L_dt"].to_numpy(dtype=float)))
-        scale = max(1.0, float(np.nanmax(np.abs(out["dE_L_dt"]))))
-        if diff > 1e-8 * scale:
-            print(
-                "Warning: sum of toolkit component tendencies differs slightly from "
-                f"gradient(E_L): max abs difference={diff:.6g} W/m^2"
-            )
+        centered = out["dE_L_dt_centered"].to_numpy(dtype=float)
+        valid = np.isfinite(toolkit_tendency) & np.isfinite(centered)
+        if valid.any():
+            diff = float(np.max(np.abs(toolkit_tendency[valid] - centered[valid])))
+            scale = max(1.0, float(np.max(np.abs(centered[valid]))))
+            if diff > 1e-8 * scale:
+                print(
+                    "Warning: sum of toolkit component tendencies differs from "
+                    f"centered gradient(E_L): max abs difference={diff:.6g} W/m^2"
+                )
 
     return out
 
@@ -264,6 +323,7 @@ def load_radiation_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Radiation CSV not found: {path}")
     df = _read_time_indexed_csv(path)
+    validate_regular_time_index(df.index, "6h", label="Radiation CSV")
 
     aliases = {c.lower(): c for c in df.columns}
     rn_col = next(
@@ -283,6 +343,8 @@ def load_radiation_csv(path: Path) -> pd.DataFrame:
         f = pd.to_numeric(df[aliases["f"]], errors="raise")
         rn = (q * (1.0 - alpha) - f).rename("R_n")
 
+    if not np.isfinite(rn.to_numpy(dtype=float)).all():
+        raise ValueError("Radiation contains non-finite values.")
     return rn.to_frame()
 
 
@@ -308,6 +370,7 @@ def load_precipitation_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Precipitation CSV not found: {path}")
     df = _read_time_indexed_csv(path)
+    validate_regular_time_index(df.index, "6h", label="Precipitation CSV")
     aliases = {c.lower(): c for c in df.columns}
     z_col = next(
         (
@@ -322,15 +385,65 @@ def load_precipitation_csv(path: Path) -> pd.DataFrame:
             "Precipitation CSV needs one of: Z, precipitation, precip, tp, precip_mm_day"
         )
     z = pd.to_numeric(df[z_col], errors="raise").rename("Z")
+    if not np.isfinite(z.to_numpy(dtype=float)).all():
+        raise ValueError("Precipitation contains non-finite values.")
     if (z < 0).any():
         raise ValueError("Precipitation contains negative values")
     return z.to_frame()
 
 
-def _resample_if_requested(df: pd.DataFrame, frequency: Optional[str]) -> pd.DataFrame:
+def _resample_if_requested(
+    df: pd.DataFrame,
+    frequency: Optional[str],
+    required_columns: Optional[list[str]] = None,
+) -> pd.DataFrame:
+    """Resample interval-ending data into complete right-labelled bins.
+
+    Only required_columns determine whether a bin is complete. Optional
+    diagnostics are averaged from available values without invalidating the
+    primary LEC/radiation analysis.
+    """
+
     if not frequency:
         return df
-    return df.resample(frequency).mean().dropna(how="all")
+
+    try:
+        target_delta = (
+            pd.Timedelta(days=1)
+            if frequency.strip().lower() in {"d", "1d"}
+            else pd.Timedelta(frequency)
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Resampling frequency must be a fixed duration that is a multiple of 6h."
+        ) from exc
+
+    six_hours = pd.Timedelta(hours=6)
+    if target_delta <= pd.Timedelta(0) or target_delta % six_hours != pd.Timedelta(0):
+        raise ValueError(
+            "Resampling frequency must be a positive multiple of 6h (for example 6h or D)."
+        )
+
+    expected = int(target_delta / six_hours)
+    resampler = df.resample(
+        frequency, origin="start_day", closed="right", label="right"
+    )
+    counts = resampler.count()
+    means = resampler.mean()
+    required = list(df.columns) if required_columns is None else list(required_columns)
+    missing_required = set(required).difference(df.columns)
+    if missing_required:
+        raise ValueError(f"Required resampling columns are missing: {sorted(missing_required)}")
+    complete = counts[required].eq(expected).all(axis=1)
+    result = means.loc[complete].copy()
+    if len(result) > 1:
+        result_intervals = result.index.to_series().diff().dropna()
+        if not result_intervals.eq(target_delta).all():
+            raise ValueError(
+                "Complete resampled windows are not contiguous. An interior "
+                "incomplete window would compress the time axis."
+            )
+    return result
 
 
 def align_energy_and_radiation(
@@ -339,32 +452,47 @@ def align_energy_and_radiation(
     frequency: Optional[str] = None,
     min_abs_rn: float = 0.5,
 ) -> pd.DataFrame:
-    """Align dE_L/dt and R_n and compute dimensionless gamma."""
-    lec2 = _resample_if_requested(lec, frequency)
+    """Align interval-ending LEC tendencies and radiation without silent joins."""
+    if not np.isfinite(min_abs_rn) or min_abs_rn < 0:
+        raise ValueError("min_abs_rn must be finite and non-negative.")
+
+    lec2 = _resample_if_requested(
+        lec, frequency, required_columns=["dE_L_dt"]
+    )
     rad2 = _resample_if_requested(radiation, frequency)
-    merged = lec2.join(rad2[["R_n"]], how="inner")
-    if merged.empty:
+
+    # The first LEC state has no preceding interval. Every subsequent tendency
+    # must have one and only one matching interval-ending radiation value.
+    valid_lec = lec2.loc[lec2["dE_L_dt"].notna()].copy()
+    if not valid_lec.index.equals(rad2.index):
+        missing_rn = valid_lec.index.difference(rad2.index)
+        extra_rn = rad2.index.difference(valid_lec.index)
         raise ValueError(
-            "No common timestamps between LEC and radiation. "
-            "Use --resample (for example D or 6h) only if scientifically appropriate."
+            "LEC and radiation timestamps do not match exactly after "
+            f"{frequency or '6-hourly'} alignment. "
+            f"Missing radiation timestamps={list(missing_rn[:5])}; "
+            f"unmatched radiation timestamps={list(extra_rn[:5])}."
         )
+
+    merged = valid_lec.join(rad2[["R_n"]], how="left", validate="one_to_one")
+    if merged.empty:
+        raise ValueError("No complete common timestamps remain after alignment.")
 
     rn = merged["R_n"].to_numpy(dtype=float)
-    bad = ~np.isfinite(rn) | (np.abs(rn) < min_abs_rn)
-    if bad.any():
-        print(
-            f"Warning: dropping {int(bad.sum())} samples where |R_n| < {min_abs_rn} W/m^2 "
-            "or R_n is non-finite; gamma would be numerically unstable there."
-        )
-        merged = merged.loc[~bad].copy()
+    tendency = merged["dE_L_dt"].to_numpy(dtype=float)
+    stable = np.isfinite(rn) & (np.abs(rn) >= min_abs_rn) & np.isfinite(tendency)
 
-    if len(merged) < 3:
+    # Keep the complete chronological index. A small/unstable denominator
+    # masks gamma at that timestamp; it must not remove the timestamp and
+    # compress the time series used by downstream diagnostics.
+    merged["gamma"] = np.nan
+    merged.loc[stable, "gamma"] = (
+        merged.loc[stable, "dE_L_dt"] / merged.loc[stable, "R_n"]
+    )
+    if int(stable.sum()) < 3:
         raise ValueError("Too few valid samples remain after radiation alignment")
-
-    merged["gamma"] = merged["dE_L_dt"] / merged["R_n"]
-    if not np.isfinite(merged["gamma"]).all():
-        raise ValueError("gamma contains non-finite values")
     return merged
+
 
 
 def simulate_precipitation_from_gamma(
@@ -405,39 +533,141 @@ def estimate_conditional_pdf(
     gamma_points: int = 80,
     z_points: int = 120,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Estimate p(Z|gamma) and the paper's Psi = p(Z|gamma)/p(gamma)."""
+    """Estimate p(Z|gamma) and Psi=p(Z|gamma)/p(gamma) on Z >= 0.
+
+    The gamma trimming follows the 1st/99th-percentile filter in the paper's
+    Appendix. Precipitation observations are not trimmed. Because precipitation
+    is non-negative, the KDE marginal p(gamma) is integrated over the positive
+    Z support, rather than over an arbitrary plotting window.
+    """
     gamma = np.asarray(gamma, dtype=float)
     z = np.asarray(z, dtype=float)
     valid = np.isfinite(gamma) & np.isfinite(z)
     gamma = gamma[valid]
     z = z[valid]
+
     if len(gamma) < 20:
         raise ValueError("At least 20 finite samples are recommended for 2-D KDE")
+    if np.any(z < 0):
+        raise ValueError("Precipitation values for KDE must be non-negative.")
     if np.std(gamma) == 0 or np.std(z) == 0:
         raise ValueError("KDE requires non-zero variance in both gamma and Z")
 
     lower_g, upper_g = np.percentile(gamma, [1, 99])
-    lower_z, upper_z = np.percentile(z, [0, 99.5])
-    if upper_z <= lower_z:
-        upper_z = float(np.max(z))
-    filtered = (gamma >= lower_g) & (gamma <= upper_g) & (z >= lower_z) & (z <= upper_z)
-    gf = gamma[filtered]
-    zf = z[filtered]
+    selected = (gamma > lower_g) & (gamma < upper_g)
+    gf = gamma[selected]
+    zf = z[selected]
     if len(gf) < 15:
         gf, zf = gamma, z
 
     kde = gaussian_kde(np.vstack([gf, zf]))
     gamma_grid = np.linspace(float(np.min(gf)), float(np.max(gf)), gamma_points)
-    z_grid = np.linspace(max(0.0, float(np.min(zf))), float(np.max(zf)), z_points)
-    gm, zm = np.meshgrid(gamma_grid, z_grid)
-    joint = kde(np.vstack([gm.ravel(), zm.ravel()])).reshape(z_grid.size, gamma_grid.size)
 
-    p_gamma = np.trapezoid(joint, z_grid, axis=0)
-    eps = np.finfo(float).eps
-    p_gamma = np.maximum(p_gamma, eps)
-    conditional = joint / p_gamma[np.newaxis, :]
-    psi = conditional / p_gamma[np.newaxis, :]
+    # The upper bound extends five KDE bandwidths beyond the largest
+    # observed precipitation amount, capturing the positive Gaussian tail.
+    z_bandwidth = float(np.sqrt(kde.covariance[1, 1]))
+    z_upper = float(np.max(zf) + 5.0 * z_bandwidth)
+    z_grid = np.linspace(0.0, z_upper, z_points)
+    gamma_mesh, z_mesh = np.meshgrid(gamma_grid, z_grid)
+    joint = kde(
+        np.vstack([gamma_mesh.ravel(), z_mesh.ravel()])
+    ).reshape(z_grid.size, gamma_grid.size)
+
+    # Integrate the joint KDE on the same saved grid used for all outputs.
+    # This makes p(Z|gamma) exactly normalized under trapezoidal integration
+    # and gives a consistent marginal p(gamma) for the paper's Eq. 40 ratio.
+    marginal_gamma_raw = np.trapezoid(joint, z_grid, axis=0)
+    if not np.isfinite(marginal_gamma_raw).all() or np.any(marginal_gamma_raw <= 0):
+        raise ValueError("KDE produced an invalid marginal density for gamma.")
+    marginal_mass = float(np.trapezoid(marginal_gamma_raw, gamma_grid))
+    if not np.isfinite(marginal_mass) or marginal_mass <= 0:
+        raise ValueError("KDE marginal density could not be normalized.")
+    marginal_gamma = marginal_gamma_raw / marginal_mass
+
+    conditional = joint / marginal_gamma_raw[np.newaxis, :]
+    psi = conditional / marginal_gamma[np.newaxis, :]
     return z_grid, gamma_grid, conditional, psi
+
+
+def conditional_probabilities(
+    z_grid: np.ndarray,
+    conditional_pdf: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return F(Z|gamma) and P(Z > z_threshold | gamma) on the KDE grid."""
+    z_grid = np.asarray(z_grid, dtype=float)
+    density = np.asarray(conditional_pdf, dtype=float)
+    if z_grid.ndim != 1 or density.ndim != 2 or density.shape[0] != z_grid.size:
+        raise ValueError("Conditional PDF dimensions do not match the Z grid.")
+    if z_grid.size < 2 or not np.all(np.diff(z_grid) > 0):
+        raise ValueError("Z grid must be strictly increasing with at least two points.")
+    if not np.isfinite(density).all() or np.any(density < 0):
+        raise ValueError("Conditional PDF must be finite and non-negative.")
+
+    cdf = cumulative_trapezoid(density, z_grid, axis=0, initial=0.0)
+    final_mass = cdf[-1, :]
+    if np.any(~np.isfinite(final_mass)) or np.any(final_mass <= 0):
+        raise ValueError("Conditional PDF has invalid integrated probability mass.")
+    cdf = cdf / final_mass[np.newaxis, :]
+    cdf = np.maximum.accumulate(np.clip(cdf, 0.0, 1.0), axis=0)
+    exceedance = np.clip(1.0 - cdf, 0.0, 1.0)
+    return cdf, exceedance
+
+
+def map_exceedance_to_observations(
+    frame: pd.DataFrame,
+    z_grid: np.ndarray,
+    gamma_grid: np.ndarray,
+    exceedance_probability: np.ndarray,
+) -> pd.DataFrame:
+    """Interpolate threshold exceedance probabilities to every observed time.
+
+    Probabilities are left undefined (NaN) when gamma is masked or outside
+    the KDE gamma grid; no extrapolation is performed.
+    """
+    z_grid = np.asarray(z_grid, dtype=float)
+    gamma_grid = np.asarray(gamma_grid, dtype=float)
+    exceedance_probability = np.asarray(exceedance_probability, dtype=float)
+    expected_shape = (z_grid.size, gamma_grid.size)
+    if exceedance_probability.shape != expected_shape:
+        raise ValueError("Exceedance-probability matrix does not match its grids.")
+
+    chunks = []
+    for timestamp, row in frame.iterrows():
+        gamma_value = float(row["gamma"]) if pd.notna(row["gamma"]) else np.nan
+        if (
+            np.isfinite(gamma_value)
+            and gamma_grid[0] <= gamma_value <= gamma_grid[-1]
+        ):
+            probabilities = np.array(
+                [
+                    np.interp(gamma_value, gamma_grid, exceedance_probability[i])
+                    for i in range(z_grid.size)
+                ],
+                dtype=float,
+            )
+        else:
+            probabilities = np.full(z_grid.size, np.nan, dtype=float)
+
+        chunks.append(
+            pd.DataFrame(
+                {
+                    "time": timestamp,
+                    "gamma": gamma_value,
+                    "Z_observed_mm_day": float(row["Z"]),
+                    "Z_threshold_mm_day": z_grid,
+                    "P_exceedance_given_gamma": probabilities,
+                }
+            )
+        )
+
+    if not chunks:
+        return pd.DataFrame(
+            columns=[
+                "time", "gamma", "Z_observed_mm_day",
+                "Z_threshold_mm_day", "P_exceedance_given_gamma",
+            ]
+        )
+    return pd.concat(chunks, ignore_index=True)
 
 
 def build_analysis(
@@ -446,18 +676,42 @@ def build_analysis(
     frequency: Optional[str] = None,
 ) -> AnalysisResult:
     precip = _resample_if_requested(precipitation, frequency)
-    frame = energy_gamma.join(precip[["Z"]], how="inner")
-    frame = frame.replace([np.inf, -np.inf], np.nan).dropna(subset=["gamma", "Z"])
-    if len(frame) < 20:
+    if not energy_gamma.index.equals(precip.index):
+        missing = energy_gamma.index.difference(precip.index)
+        extra = precip.index.difference(energy_gamma.index)
         raise ValueError(
-            f"Only {len(frame)} common gamma/precipitation samples are available; need at least 20"
+            "Precipitation timestamps must exactly match the aligned "
+            "LEC/radiation timeline; missing timestamps or unmatched "
+            "timestamps were found. "
+            f"Missing={list(missing[:5])}; unmatched={list(extra[:5])}."
+        )
+    frame = energy_gamma.join(precip[["Z"]], how="left", validate="one_to_one")
+    frame = frame.replace([np.inf, -np.inf], np.nan)
+    if frame["Z"].isna().any() or not np.isfinite(frame["Z"].to_numpy(dtype=float)).all():
+        raise ValueError("Aligned precipitation contains missing or non-finite values.")
+
+    valid_pairs = np.isfinite(frame["gamma"].to_numpy(dtype=float)) & np.isfinite(
+        frame["Z"].to_numpy(dtype=float)
+    )
+    if int(valid_pairs.sum()) < 20:
+        raise ValueError(
+            f"Only {int(valid_pairs.sum())} finite gamma/precipitation pairs are available; need at least 20"
         )
 
-    corr = float(frame["gamma"].corr(frame["Z"]))
+    # Statistical summaries use pairwise-valid values, while frame retains
+    # all original timestamps and masked gamma values for time-series work.
+    valid_frame = frame.loc[valid_pairs]
+    corr = float(valid_frame["gamma"].corr(valid_frame["Z"]))
     z_grid, gamma_grid, cond, psi = estimate_conditional_pdf(
-        frame["gamma"].to_numpy(), frame["Z"].to_numpy()
+        valid_frame["gamma"].to_numpy(), valid_frame["Z"].to_numpy()
     )
-    return AnalysisResult(frame, z_grid, gamma_grid, cond, psi, corr)
+    conditional_cdf, exceedance = conditional_probabilities(z_grid, cond)
+    return AnalysisResult(
+        frame, z_grid, gamma_grid, cond, psi,
+        conditional_cdf, exceedance, corr
+    )
+
+
 
 
 def _save_figure(fig: plt.Figure, path: Path) -> None:
@@ -503,6 +757,19 @@ def create_plots(result: AnalysisResult, output_dir: Path) -> None:
     ax.set_ylabel("Z [mm/day]")
     ax.set_title("PDF Ratio Psi(Z, gamma)")
     _save_figure(fig, output_dir / "04_pdf_ratio_psi.png")
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    cf = ax.contourf(
+        result.gamma_grid,
+        result.z_grid,
+        result.exceedance_probability,
+        levels=np.linspace(0.0, 1.0, 21),
+    )
+    fig.colorbar(cf, ax=ax, label="P(Z > threshold | gamma)")
+    ax.set_xlabel("gamma [-]")
+    ax.set_ylabel("Precipitation threshold [mm/day]")
+    ax.set_title("Conditional precipitation exceedance probability")
+    _save_figure(fig, output_dir / "06_precipitation_exceedance_probability.png")
 
     bins = np.linspace(float(df["gamma"].min()), float(df["gamma"].max()), 15)
     cats = pd.cut(df["gamma"], bins=bins, include_lowest=True)
@@ -559,13 +826,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--resample",
         default=None,
-        help="Optional pandas frequency for ALL aligned series, e.g. D or 6h",
+        help="Optional fixed resampling interval (multiple of 6h, e.g. 6h or D); only complete right-labelled bins are retained",
     )
     parser.add_argument(
         "--min-abs-rn",
         type=float,
         default=0.5,
-        help="Drop samples with |Rn| below this W/m^2 threshold (default 0.5)",
+        help="Mask gamma when |Rn| is below this W/m^2 threshold; timestamps are retained (default 0.5)",
     )
     parser.add_argument("--output-dir", type=Path, default=Path("LEC_paper_results"))
     parser.add_argument("--seed", type=int, default=42)
@@ -627,11 +894,88 @@ def main() -> int:
 
     result = build_analysis(energy_gamma, precipitation, frequency=args.resample)
     result.frame.to_csv(output_dir / "analysis_timeseries.csv", index_label="time")
+    conditional_frame = pd.DataFrame(
+        result.conditional_pdf,
+        index=pd.Index(result.z_grid, name="Z_mm_day"),
+        columns=pd.Index(result.gamma_grid, name="gamma"),
+    )
+    psi_frame = pd.DataFrame(
+        result.psi,
+        index=pd.Index(result.z_grid, name="Z_mm_day"),
+        columns=pd.Index(result.gamma_grid, name="gamma"),
+    )
+    conditional_frame.to_csv(output_dir / "conditional_pdf.csv")
+    psi_frame.to_csv(output_dir / "psi.csv")
+    cdf_frame = pd.DataFrame(
+        result.conditional_cdf,
+        index=pd.Index(result.z_grid, name="Z_threshold_mm_day"),
+        columns=pd.Index(result.gamma_grid, name="gamma"),
+    )
+    exceedance_frame = pd.DataFrame(
+        result.exceedance_probability,
+        index=pd.Index(result.z_grid, name="Z_threshold_mm_day"),
+        columns=pd.Index(result.gamma_grid, name="gamma"),
+    )
+    cdf_frame.to_csv(output_dir / "conditional_cdf.csv")
+    exceedance_frame.to_csv(
+        output_dir / "precipitation_exceedance_probability.csv"
+    )
+    probability_timeseries = map_exceedance_to_observations(
+        result.frame,
+        result.z_grid,
+        result.gamma_grid,
+        result.exceedance_probability,
+    )
+    probability_timeseries.to_csv(
+        output_dir / "precipitation_exceedance_timeseries.csv",
+        index=False,
+    )
     create_plots(result, output_dir)
+
+    valid_gamma = np.isfinite(result.frame["gamma"].to_numpy(dtype=float))
+    analysis_metadata = {
+        "python_version": platform.python_version(),
+        "packages": {},
+        "lec_results_csv": str(lec_csv),
+        "radiation_csv": str(args.radiation_csv) if args.radiation_csv else "synthetic demonstration",
+        "precipitation_csv": str(args.precipitation_csv) if args.precipitation_csv else "synthetic demonstration",
+        "resampling_frequency": args.resample or "6h",
+        "timestamp_convention": "interval-ending; backward finite difference",
+        "daily_window": "(previous midnight, current midnight]" if args.resample and args.resample.lower() in {"d", "1d", "24h"} else None,
+        "gamma_definition": "dE_L_dt / R_n",
+        "minimum_absolute_radiation_W_m2": args.min_abs_rn,
+        "low_radiation_handling": "gamma is masked with NaN; timestamps are retained",
+        "total_samples": int(len(result.frame)),
+        "valid_gamma_samples": int(valid_gamma.sum()),
+        "masked_gamma_samples": int((~valid_gamma).sum()),
+        "finite_gamma_precipitation_pairs": int(valid_gamma.sum()),
+        "first_timestamp": str(result.frame.index.min()),
+        "last_timestamp": str(result.frame.index.max()),
+        "kde_gamma_percentile_filter": [1, 99],
+        "kde_precipitation_support_mm_day": [0.0, float(result.z_grid[-1])],
+        "conditional_pdf_normalization": "exact trapezoidal normalization over the saved non-negative Z grid",
+        "probability_output": "P(Z > z_threshold | gamma), for every observed timestamp and every Z threshold on the saved grid",
+        "probability_interpolation": "linear interpolation within the fitted gamma grid; no extrapolation; masked/out-of-range gamma values produce NaN",
+        "psi_interpretation": "PDF ratio from paper Eq. 40; not itself an event probability",
+        "zero_precipitation_treatment": "continuous KDE; no point mass at exactly zero is estimated",
+        "wet_day_probability": "requires a separately specified wet-day threshold and binary or hurdle model",
+        "random_seed": args.seed,
+    }
+    for package in ("numpy", "pandas", "scipy", "matplotlib", "xarray", "LorenzCycleToolkit"):
+        try:
+            analysis_metadata["packages"][package] = metadata.version(package)
+        except metadata.PackageNotFoundError:
+            analysis_metadata["packages"][package] = None
+    (output_dir / "analysis_metadata.json").write_text(
+        json.dumps(analysis_metadata, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     summary = pd.Series(
         {
-            "n_samples": len(result.frame),
+            "n_samples_total": len(result.frame),
+            "n_gamma_valid": int(np.isfinite(result.frame["gamma"]).sum()),
+            "n_gamma_masked": int(result.frame["gamma"].isna().sum()),
             "pearson_r_gamma_Z": result.correlation,
             "gamma_mean": result.frame["gamma"].mean(),
             "gamma_std": result.frame["gamma"].std(),

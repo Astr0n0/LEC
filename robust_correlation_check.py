@@ -1,39 +1,41 @@
-﻿import pandas as pd
+"""Pearson/Spearman robustness checks on interval-aligned ERA5 inputs."""
+
 import numpy as np
 from scipy.stats import spearmanr
 
-files = {
-    "6-hourly": r"LEC_100d_real\analysis_timeseries.csv",
-    "daily": r"LEC_100d_daily\analysis_timeseries.csv",
-}
+from era5_analysis import load_interval_analysis
+
+from analysis_config import get_analysis_inputs
+
+LEC_FILE, RADIATION_FILE, PRECIPITATION_FILE = map(str, get_analysis_inputs())
 
 thresholds = [0.5, 5, 10, 20, 40, 50]
 
-for name, path in files.items():
-    df = pd.read_csv(path)
+for name, frequency in (("6-hourly", "6h"), ("Aligned daily", "D")):
+    df = load_interval_analysis(
+        LEC_FILE,
+        RADIATION_FILE,
+        PRECIPITATION_FILE,
+        frequency=frequency,
+        min_abs_rn=0.0,
+    )
 
     print(f"\n=== {name} ===")
     print("threshold   n      pearson      spearman")
-
     for threshold in thresholds:
-        x = df.loc[
+        mask = (
             np.isfinite(df["gamma"])
             & np.isfinite(df["Z"])
-            & np.isfinite(df["R_n"])
-            & (df["R_n"].abs() >= threshold),
-            ["gamma", "Z"]
-        ]
+            & (df["R_n"].abs() >= threshold)
+        )
+        sample = df.loc[mask, ["gamma", "Z"]]
+        if len(sample) < 3:
+            print(f"{threshold:>8} {len(sample):>4} insufficient")
+            continue
 
-        pearson = x["gamma"].corr(x["Z"])
-        spearman = spearmanr(
-            x["gamma"],
-            x["Z"],
-            nan_policy="omit",
-        ).statistic
-
+        pearson = sample["gamma"].corr(sample["Z"])
+        spearman = spearmanr(sample["gamma"], sample["Z"]).statistic
         print(
-            f"{threshold:>8} "
-            f"{len(x):>4} "
-            f"{pearson:>12.6f} "
-            f"{spearman:>12.6f}"
+            f"{threshold:>8} {len(sample):>4} "
+            f"{pearson:>12.6f} {spearman:>12.6f}"
         )

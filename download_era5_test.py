@@ -1,7 +1,8 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import cdsapi
+import pandas as pd
 import xarray as xr
 
 
@@ -57,6 +58,35 @@ def build_month_groups():
     return groups
 
 
+def is_valid_netcdf(path, year, month, days):
+    if not path.exists():
+        return False
+
+    try:
+        with xr.open_dataset(path) as ds:
+            required_vars = {"z", "t", "u", "v", "w"}
+            required_coords = {"valid_time", "pressure_level"}
+            if not required_vars.issubset(ds.data_vars):
+                return False
+            if not required_coords.issubset(ds.coords):
+                return False
+            if ds.sizes.get("valid_time") != len(days) * len(TIMES):
+                return False
+            levels = {str(int(level)) for level in ds["pressure_level"].values}
+            if levels != set(PRESSURE_LEVELS):
+                return False
+
+            expected = pd.DatetimeIndex([
+                datetime(year, month, day, int(hour[:2]))
+                for day in days
+                for hour in TIMES
+            ])
+            actual = pd.DatetimeIndex(ds["valid_time"].values)
+            return actual.equals(expected)
+    except Exception:
+        return False
+
+
 def download_parts():
     PARTS_DIR.mkdir(exist_ok=True)
 
@@ -67,9 +97,13 @@ def download_parts():
         part_file = PARTS_DIR / f"era5_{year}_{month:02d}.nc"
         files.append(part_file)
 
-        if part_file.exists():
+        if is_valid_netcdf(part_file, year, month, days):
             print(f"EXISTS: {part_file}")
             continue
+
+        if part_file.exists():
+            print(f"INVALID: {part_file} -- removing")
+            part_file.unlink()
 
         request = {
             "product_type": ["reanalysis"],
@@ -115,13 +149,19 @@ def combine_parts(files):
 
         combined = combined.sortby("valid_time")
 
-        _, unique_indices = xr.DataArray(
-            combined["valid_time"].values
-        ).to_series().drop_duplicates().index, None
-
-        combined = combined.sel(
-            valid_time=~combined.get_index("valid_time").duplicated()
+        expected_times = pd.date_range(
+            start=START_DATE, periods=N_DAYS * len(TIMES), freq="6h"
         )
+        actual_times = pd.DatetimeIndex(combined["valid_time"].values)
+        if not actual_times.is_unique:
+            raise ValueError("Duplicate valid_time values found across monthly files.")
+        if not actual_times.equals(expected_times):
+            missing = expected_times.difference(actual_times)
+            unexpected = actual_times.difference(expected_times)
+            raise ValueError(
+                "Combined pressure-level timeline is incomplete or unexpected. "
+                f"Missing={list(missing[:5])}; unexpected={list(unexpected[:5])}"
+            )
 
         combined.to_netcdf(OUTPUT_FILE)
 

@@ -1,80 +1,108 @@
+#!/usr/bin/env python3
+"""Prepare regional ERA5 radiation and precipitation from hourly accumulations."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import xarray as xr
 
-INPUT_FILE = "era5_surface_100d.nc"
-RADIATION_OUTPUT = "radiation_100d.csv"
-PRECIP_OUTPUT = "precipitation_100d.csv"
+from era5_surface_processing import aggregate_era5_hourly_surface
+from era5_metadata import SURFACE_UNITS, validate_grib_step_types, validate_variable_units
 
-ds = xr.open_dataset(INPUT_FILE)
 
-required = {"tsr", "ttr", "tp"}
-missing = required.difference(ds.data_vars)
-if missing:
-    raise ValueError(f"Missing variables: {sorted(missing)}")
+def process_surface_dataset(
+    input_file: Path,
+    radiation_output: Path,
+    precipitation_output: Path,
+) -> dict[str, object]:
+    """Create area-weighted, six-hourly Rn and precipitation CSV files."""
+    with xr.open_dataset(input_file) as ds:
+        required = {"tsr", "ttr", "tp"}
+        missing = required.difference(ds.data_vars)
+        if missing:
+            raise ValueError(f"Missing ERA5 surface variables: {sorted(missing)}")
 
-lat_weights = np.cos(np.deg2rad(ds["latitude"]))
-lat_weights = lat_weights / lat_weights.mean()
+        units = {name: ds[name].attrs.get("units", "") for name in required}
+        validate_variable_units(
+            units, SURFACE_UNITS, dataset_label="ERA5 surface dataset"
+        )
+        step_types = {
+            name: ds[name].attrs.get("GRIB_stepType") for name in required
+        }
+        step_type_verified = validate_grib_step_types(
+            step_types, expected="accum", dataset_label="ERA5 surface dataset"
+        )
 
-regional = ds[["tsr", "ttr", "tp"]].weighted(lat_weights).mean(
-    dim=["latitude", "longitude"]
-)
+        required_coords = {"valid_time", "latitude", "longitude"}
+        missing_coords = required_coords.difference(
+            set(ds.coords).union(ds.dims)
+        )
+        if missing_coords:
+            raise ValueError(f"Missing ERA5 coordinates: {sorted(missing_coords)}")
 
-df = regional.to_dataframe()[["tsr", "ttr", "tp"]].copy()
-df.index = pd.DatetimeIndex(df.index)
-df = df.sort_index()
+        expected_grid_cells = ds.sizes["latitude"] * ds.sizes["longitude"]
+        for variable in required:
+            finite_counts = np.isfinite(ds[variable]).sum(
+                dim=["latitude", "longitude"]
+            )
+            if bool((finite_counts != expected_grid_cells).any()):
+                raise ValueError(
+                    f"ERA5 surface variable {variable} has non-finite spatial "
+                    "grid cells; regional averaging would silently change "
+                    "the effective area."
+                )
 
-# ERA5 hourly accumulated radiation: J m^-2 during the preceding hour.
-# Build complete 6-hour periods ending at 00, 06, 12 and 18 UTC.
-counts = df["tsr"].resample("6h", closed="right", label="right").count()
+        lat = ds["latitude"]
+        weights = np.cos(np.deg2rad(lat))
+        if bool((weights <= 0).any()):
+            raise ValueError("Latitude weights must be positive in the selected domain.")
 
-tsr_6h = df["tsr"].resample(
-    "6h", closed="right", label="right"
-).sum()
+        regional = ds[["tsr", "ttr", "tp"]].weighted(weights).mean(
+            dim=["latitude", "longitude"]
+        )
+        frame = regional.to_dataframe()[["tsr", "ttr", "tp"]].copy()
+        frame.index = pd.DatetimeIndex(frame.index, name="time")
+        frame = frame.sort_index()
 
-ttr_6h = df["ttr"].resample(
-    "6h", closed="right", label="right"
-).sum()
+    radiation, precipitation, audit = aggregate_era5_hourly_surface(frame)
+    audit["grib_step_type_verified"] = bool(step_type_verified)
+    audit["spatial_grid_cells"] = int(expected_grid_cells)
+    audit["units"] = units
+    radiation_output.parent.mkdir(parents=True, exist_ok=True)
+    precipitation_output.parent.mkdir(parents=True, exist_ok=True)
+    radiation.to_csv(radiation_output, index_label="time")
+    precipitation.to_csv(precipitation_output, index_label="time")
+    return audit
 
-tp_6h = df["tp"].resample(
-    "6h", closed="right", label="right"
-).sum()
 
-complete = counts == 6
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Convert ERA5 hourly accumulated tsr/ttr/tp to 6-hourly Rn and Z."
+    )
+    parser.add_argument("--input-file", type=Path, default=Path("era5_surface_100d.nc"))
+    parser.add_argument("--radiation-output", type=Path, default=Path("radiation_100d.csv"))
+    parser.add_argument("--precipitation-output", type=Path, default=Path("precipitation_100d.csv"))
+    return parser.parse_args()
 
-tsr_6h = tsr_6h.loc[complete]
-ttr_6h = ttr_6h.loc[complete]
-tp_6h = tp_6h.loc[complete]
 
-# Mean net TOA radiation flux during each 6-hour interval [W m^-2].
-rn = (tsr_6h + ttr_6h) / (6.0 * 3600.0)
+def main() -> int:
+    args = parse_args()
+    audit = process_surface_dataset(
+        args.input_file,
+        args.radiation_output,
+        args.precipitation_output,
+    )
+    print("ERA5 surface processing audit:")
+    for key, value in audit.items():
+        print(f"{key}: {value}")
+    print(f"Saved radiation: {args.radiation_output}")
+    print(f"Saved precipitation: {args.precipitation_output}")
+    return 0
 
-radiation = pd.DataFrame(
-    {
-        "time": rn.index,
-        "Rn": rn.values,
-    }
-)
 
-# ERA5 tp is accumulated water depth [m].
-# Convert 6-hour accumulation to equivalent mean precipitation rate [mm/day].
-precip_mm_day = tp_6h * 1000.0 * (24.0 / 6.0)
-
-precipitation = pd.DataFrame(
-    {
-        "time": precip_mm_day.index,
-        "Z": precip_mm_day.values,
-    }
-)
-
-radiation.to_csv(RADIATION_OUTPUT, index=False)
-precipitation.to_csv(PRECIP_OUTPUT, index=False)
-
-print("Radiation:")
-print(radiation.to_string(index=False))
-print()
-print("Precipitation:")
-print(precipitation.to_string(index=False))
-print()
-print(f"Saved: {RADIATION_OUTPUT}")
-print(f"Saved: {PRECIP_OUTPUT}")
+if __name__ == "__main__":
+    raise SystemExit(main())

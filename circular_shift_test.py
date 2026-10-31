@@ -94,79 +94,26 @@ def max_abs_corr(gamma, z, rn):
     return best
 
 
-# Load and validate the raw inputs.
-lec = read_time_csv(r"era5_100d_fixed\paper_lec.csv")
-rad = read_time_csv("radiation_100d.csv")
-precip = read_time_csv("precipitation_100d.csv")
+# Load complete daily observations through the shared strict alignment path.
+from era5_analysis import load_interval_analysis
 
-for name, frame in (
-    ("LEC", lec),
-    ("Radiation", rad),
-    ("Precipitation", precip),
-):
-    validate_regular_time_index(frame.index, "6h", label=name)
+from analysis_config import get_analysis_inputs
 
-energy_columns = ["Az", "Ae", "Kz", "Ke"]
-missing_energy = set(energy_columns).difference(lec.columns)
+LEC_FILE, RADIATION_FILE, PRECIPITATION_FILE = map(str, get_analysis_inputs())
+daily = load_interval_analysis(
+    LEC_FILE,
+    RADIATION_FILE,
+    PRECIPITATION_FILE,
+    frequency="D",
+    min_abs_rn=0.0,
+)[["gamma", "Z", "R_n"]]
 
-if missing_energy:
-    raise ValueError(
-        f"LEC data is missing columns: {sorted(missing_energy)}"
-    )
-
-if "Rn" in rad.columns:
-    rn_col = "Rn"
-elif "R_n" in rad.columns:
-    rn_col = "R_n"
-else:
-    raise ValueError(
-        "Radiation data must contain either 'Rn' or 'R_n'."
-    )
-
-if "Z" not in precip.columns:
-    raise ValueError("Precipitation data is missing column 'Z'.")
-
-lec["E_L"] = lec[energy_columns].sum(
-    axis=1,
-    min_count=len(energy_columns),
-)
-
-dt_seconds = lec.index.to_series().diff().dt.total_seconds()
-lec["dELdt_interval"] = lec["E_L"].diff() / dt_seconds
-
-sixh_raw = (
-    lec[["dELdt_interval"]]
-    .join(rad[[rn_col]], how="inner")
-    .join(precip[["Z"]], how="inner")
-    .rename(columns={rn_col: "Rn"})
-    .replace([np.inf, -np.inf], np.nan)
-    .dropna()
-)
-
-validate_regular_time_index(
-    sixh_raw.index,
-    "6h",
-    label="Aligned raw analysis",
-)
-
-daily_means = complete_daily_windows(sixh_raw)
-daily_means = daily_means.replace([np.inf, -np.inf], np.nan)
-
-# Keep zero-Rn days out because gamma is undefined there.
-daily_means = daily_means.loc[daily_means["Rn"] != 0].copy()
-daily_means["gamma"] = (
-    daily_means["dELdt_interval"] / daily_means["Rn"]
-)
-
-daily = (
-    daily_means[["gamma", "Z", "Rn"]]
-    .replace([np.inf, -np.inf], np.nan)
-    .dropna()
-)
+# Keep every complete day on the timeline. Undefined gamma values remain NaN
+# and are masked by each threshold/lag evaluation; they are never deleted.
 
 gamma = daily["gamma"].to_numpy(dtype=float)
 z = daily["Z"].to_numpy(dtype=float)
-rn = daily["Rn"].to_numpy(dtype=float)
+rn = daily["R_n"].to_numpy(dtype=float)
 n = len(daily)
 
 if n < MIN_N:
