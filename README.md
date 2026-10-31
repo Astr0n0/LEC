@@ -70,6 +70,31 @@ The built-in default namelist expects:
 
 A custom namelist can be supplied if the NetCDF uses different variable names.
 
+## One-command local pipeline
+
+After the repository is updated and the Python environment is active, run:
+
+    python run_era5_pipeline.py
+
+The pipeline:
+
+1. Runs the automated unit tests.
+2. Validates or downloads only the missing 2020-04-10 00 UTC ERA5 endpoints.
+3. Validates the extended NetCDF time axes.
+4. Reprocesses the surface variables into 400 complete six-hour intervals.
+5. Runs LorenzCycleToolkit if the extended 401-state result does not already exist.
+6. Produces both six-hourly and 100-day complete daily analyses.
+7. Runs bootstrap, circular-shift, autocorrelation, threshold and regional-boundary diagnostics.
+8. Saves a manifest and individual logs.
+
+Original ERA5 NetCDF files are not modified. Extended NetCDF files, processed CSVs,
+analysis outputs and logs are written as separate files/folders. If an optional
+diagnostic fails, the pipeline records its log and continues with the remaining
+diagnostics; the core data and LEC steps remain fail-fast.
+
+The analysis scripts automatically prefer the extended input set when all three
+extended files are present, and otherwise use the original pilot files.
+
 ## Recommended workflow
 
 ### 1. Install
@@ -140,6 +165,9 @@ Provide a time column and one of `Z`, `precipitation`, `precip`, `tp`, or `preci
 
 - `analysis_timeseries.csv`
 - `summary.csv`
+- `conditional_pdf.csv`
+- `psi.csv`
+- `analysis_metadata.json`
 - `01_time_series.png`
 - `02_scatter.png`
 - `03_conditional_pdf.png`
@@ -147,7 +175,10 @@ Provide a time column and one of `Z`, `precipitation`, `precip`, `tp`, or `preci
 - `05_conditional_expectation.png`
 - Toolkit stdout/stderr logs when Toolkit is run by the script
 
-## ERA5 100-day pilot result
+## ERA5 100-day pilot result — historical values pending rerun
+
+The figures below are retained as historical pilot outputs. They are not the final results of the updated pipeline. Recompute them with `python run_era5_pipeline.py` before citing them.
+
 
 A 100-day regional ERA5 experiment was performed over:
 
