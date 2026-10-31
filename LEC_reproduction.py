@@ -613,6 +613,63 @@ def conditional_probabilities(
     return cdf, exceedance
 
 
+def map_exceedance_to_observations(
+    frame: pd.DataFrame,
+    z_grid: np.ndarray,
+    gamma_grid: np.ndarray,
+    exceedance_probability: np.ndarray,
+) -> pd.DataFrame:
+    """Interpolate threshold exceedance probabilities to every observed time.
+
+    Probabilities are left undefined (NaN) when gamma is masked or outside
+    the KDE gamma grid; no extrapolation is performed.
+    """
+    z_grid = np.asarray(z_grid, dtype=float)
+    gamma_grid = np.asarray(gamma_grid, dtype=float)
+    exceedance_probability = np.asarray(exceedance_probability, dtype=float)
+    expected_shape = (z_grid.size, gamma_grid.size)
+    if exceedance_probability.shape != expected_shape:
+        raise ValueError("Exceedance-probability matrix does not match its grids.")
+
+    chunks = []
+    for timestamp, row in frame.iterrows():
+        gamma_value = float(row["gamma"]) if pd.notna(row["gamma"]) else np.nan
+        if (
+            np.isfinite(gamma_value)
+            and gamma_grid[0] <= gamma_value <= gamma_grid[-1]
+        ):
+            probabilities = np.array(
+                [
+                    np.interp(gamma_value, gamma_grid, exceedance_probability[i])
+                    for i in range(z_grid.size)
+                ],
+                dtype=float,
+            )
+        else:
+            probabilities = np.full(z_grid.size, np.nan, dtype=float)
+
+        chunks.append(
+            pd.DataFrame(
+                {
+                    "time": timestamp,
+                    "gamma": gamma_value,
+                    "Z_observed_mm_day": float(row["Z"]),
+                    "Z_threshold_mm_day": z_grid,
+                    "P_exceedance_given_gamma": probabilities,
+                }
+            )
+        )
+
+    if not chunks:
+        return pd.DataFrame(
+            columns=[
+                "time", "gamma", "Z_observed_mm_day",
+                "Z_threshold_mm_day", "P_exceedance_given_gamma",
+            ]
+        )
+    return pd.concat(chunks, ignore_index=True)
+
+
 def build_analysis(
     energy_gamma: pd.DataFrame,
     precipitation: pd.DataFrame,
@@ -863,6 +920,16 @@ def main() -> int:
     exceedance_frame.to_csv(
         output_dir / "precipitation_exceedance_probability.csv"
     )
+    probability_timeseries = map_exceedance_to_observations(
+        result.frame,
+        result.z_grid,
+        result.gamma_grid,
+        result.exceedance_probability,
+    )
+    probability_timeseries.to_csv(
+        output_dir / "precipitation_exceedance_timeseries.csv",
+        index=False,
+    )
     create_plots(result, output_dir)
 
     valid_gamma = np.isfinite(result.frame["gamma"].to_numpy(dtype=float))
@@ -887,7 +954,8 @@ def main() -> int:
         "kde_gamma_percentile_filter": [1, 99],
         "kde_precipitation_support_mm_day": [0.0, float(result.z_grid[-1])],
         "conditional_pdf_normalization": "exact trapezoidal normalization over the saved non-negative Z grid",
-        "probability_output": "P(Z > z_threshold | gamma), with every Z threshold on the saved grid",
+        "probability_output": "P(Z > z_threshold | gamma), for every observed timestamp and every Z threshold on the saved grid",
+        "probability_interpolation": "linear interpolation within the fitted gamma grid; no extrapolation; masked/out-of-range gamma values produce NaN",
         "psi_interpretation": "PDF ratio from paper Eq. 40; not itself an event probability",
         "zero_precipitation_treatment": "continuous KDE; no point mass at exactly zero is estimated",
         "wet_day_probability": "requires a separately specified wet-day threshold and binary or hurdle model",
