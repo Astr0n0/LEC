@@ -36,7 +36,7 @@ Processed surface data: radiation_100d_extended.csv and precipitation_100d_exten
 
 Toolkit output: era5_100d_extended_fixed/paper_lec.csv.
 
-Analysis folders: LEC_100d_extended_analysis and LEC_100d_extended_daily_analysis. Each contains analysis_timeseries.csv, summary.csv, conditional_pdf.csv, psi.csv, conditional_cdf.csv, precipitation_exceedance_probability.csv, analysis_metadata.json and plots. The six-hourly folder also contains pipeline_manifest.json and pipeline_logs/.
+Analysis folders: LEC_100d_extended_analysis and LEC_100d_extended_daily_analysis. Each contains analysis_timeseries.csv, summary.csv, conditional_pdf.csv, psi.csv, conditional_cdf.csv, precipitation_exceedance_probability.csv, precipitation_exceedance_timeseries.csv, analysis_metadata.json and plots. The six-hourly folder also contains pipeline_manifest.json and pipeline_logs/.
 
 ## Validation criteria
 - 401 unique six-hourly pressure states from 2020-01-01 00 to 2020-04-10 00 UTC.
